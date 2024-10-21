@@ -11,7 +11,7 @@ endif()
 
 # OSX compatibility needs to be set before project is declared
 set(CMAKE_OSX_DEPLOYMENT_TARGET
-    13.3
+    12
     CACHE STRING "")
 
 project(nano-node)
@@ -37,15 +37,15 @@ if(MSVC)
   add_definitions(/MP)
 endif()
 
-set(CPACK_PACKAGE_VENDOR "Nano Currency")
-set(CPACK_PACKAGE_VERSION_MAJOR "28")
-set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VENDOR "Nanobitcoin")
+set(CPACK_PACKAGE_VERSION_MAJOR "26")
+set(CPACK_PACKAGE_VERSION_MINOR "1")
 set(CPACK_PACKAGE_VERSION_PATCH "0")
 
 if(CI_VERSION_PRE_RELEASE)
   set(CPACK_PACKAGE_VERSION_PRE_RELEASE "${CI_VERSION_PRE_RELEASE}")
 else()
-  set(CPACK_PACKAGE_VERSION_PRE_RELEASE "99")
+  set(CPACK_PACKAGE_VERSION_PRE_RELEASE "0")
 endif()
 
 if(CI_TAG)
@@ -97,6 +97,7 @@ set_property(
            block_arrival
            block_processor
            block_uniquer
+           confirmation_height_processor
            dropped_elections,
            election_winner_details
            gap_cache
@@ -132,17 +133,6 @@ if(NANO_STACKTRACE_BACKTRACE)
   endif()
 endif()
 
-# Enable NANO_TRACING by default in Debug builds
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  option(NANO_TRACING "Enable trace logging" ON)
-else()
-  option(NANO_TRACING "Enable trace logging" OFF)
-endif()
-if(NANO_TRACING)
-  message(STATUS "Using trace logging")
-  add_compile_definitions(NANO_TRACING)
-endif()
-
 if(${NANO_TIMED_LOCKS} GREATER 0)
   add_definitions(-DNANO_TIMED_LOCKS=${NANO_TIMED_LOCKS})
   add_definitions(-DNANO_TIMED_LOCKS_FILTER=${NANO_TIMED_LOCKS_FILTER})
@@ -165,47 +155,47 @@ option(
 option(ENABLE_AVX2 "Enable AVX2 optimizations" OFF)
 
 set(ACTIVE_NETWORK
-    nano_live_network
+    nanobitcoin_live_network
     CACHE STRING "Selects which network parameters are used")
 set_property(
-  CACHE ACTIVE_NETWORK PROPERTY STRINGS nano_dev_network nano_beta_network
-                                nano_live_network nano_test_network)
+  CACHE ACTIVE_NETWORK PROPERTY STRINGS nanobitcoin_dev_network nanobitcoin_beta_network
+                                nanobitcoin_live_network nanobitcoin_test_network)
 set(CPACK_PACKAGE_NAME
     "nano-node"
     CACHE STRING "" FORCE)
 set(CPACK_NSIS_PACKAGE_NAME
-    "Nano"
+    "Nanobitcoin"
     CACHE STRING "" FORCE)
 set(CPACK_PACKAGE_INSTALL_DIRECTORY
-    "nanocurrency"
+    "nanobitcoin"
     CACHE STRING "" FORCE)
-set(NANO_SERVICE "nanocurrency.service")
+set(NANO_SERVICE "nanobitcoin.service")
 set(NANO_PREFIX "")
-if("${ACTIVE_NETWORK}" MATCHES "nano_beta_network")
+if("${ACTIVE_NETWORK}" MATCHES "nanobitcoin_beta_network")
   project("nano-node-beta")
   set(CPACK_PACKAGE_NAME
       "nano-node-beta"
       CACHE STRING "" FORCE)
   set(CPACK_NSIS_PACKAGE_NAME
-      "Nano-Beta"
+      "Nanobitcoin-Beta"
       CACHE STRING "" FORCE)
   set(CPACK_PACKAGE_INSTALL_DIRECTORY
-      "nanocurrency-beta"
+      "nanobitcoin-beta"
       CACHE STRING "" FORCE)
-  set(NANO_SERVICE "nanocurrency-beta.service")
+  set(NANO_SERVICE "nanobitcoin-beta.service")
   set(NANO_PREFIX "Beta")
-elseif("${ACTIVE_NETWORK}" MATCHES "nano_test_network")
+elseif("${ACTIVE_NETWORK}" MATCHES "nanobitcoin_test_network")
   project("nano-node-test")
   set(CPACK_PACKAGE_NAME
       "nano-node-test"
       CACHE STRING "" FORCE)
   set(CPACK_NSIS_PACKAGE_NAME
-      "Nano-Test"
+      "Nanobitcoin-Test"
       CACHE STRING "" FORCE)
   set(CPACK_PACKAGE_INSTALL_DIRECTORY
-      "nanocurrency-test"
+      "nanobitcoin-test"
       CACHE STRING "" FORCE)
-  set(NANO_SERVICE "nanocurrency-test.service")
+  set(NANO_SERVICE "nanobitcoin-test.service")
   set(NANO_PREFIX "Test")
 endif()
 set(NANO_OSX_PACKAGE_NAME
@@ -442,7 +432,6 @@ set(BOOST_MODULE_LIBS
     iterator
     lexical_cast
     property_tree
-    lambda
     log
     logic
     math
@@ -473,7 +462,6 @@ set(BOOST_MODULE_LIBS
     static_assert
     static_string
     system
-    test
     thread
     throw_exception
     tokenizer
@@ -495,10 +483,21 @@ include_directories(${BOOST_LIBRARY_INCLUDES})
 add_library(Boost::stacktrace ALIAS boost_stacktrace_basic)
 add_definitions(-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED)
 
+# Workaround for GitHub builders which do not appear to have the Windows Message
+# Compiler mc.exe
+add_definitions(-DBOOST_LOG_WITHOUT_EVENT_LOG)
+
 # Workaround for missing reference errata in the boost property_tree module
 target_link_libraries(boost_property_tree INTERFACE Boost::any)
 target_link_libraries(boost_property_tree INTERFACE Boost::format)
 target_link_libraries(boost_property_tree INTERFACE Boost::multi_index)
+
+# diskhash
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  add_library(diskhash STATIC
+              ${CMAKE_SOURCE_DIR}/submodules/diskhash/src/diskhash.c)
+  include_directories(submodules/diskhash/src)
+endif()
 
 # RocksDB
 include_directories(submodules/rocksdb/include)
@@ -534,27 +533,16 @@ else()
 endif()
 add_subdirectory(submodules/rocksdb EXCLUDE_FROM_ALL)
 
-# cpptoml
-include_directories(submodules/cpptoml/include)
+include_directories(cpptoml/include)
 
 # magic_enum
-include_directories(submodules/magic_enum/include/magic_enum)
+include_directories(submodules/magic_enum/include)
 
 add_subdirectory(crypto/ed25519-donna)
 
 add_subdirectory(nano/ipc_flatbuffers_lib)
 add_subdirectory(nano/ipc_flatbuffers_test)
 
-# fmt
-add_subdirectory(submodules/fmt EXCLUDE_FROM_ALL)
-include_directories(submodules/fmt/include)
-
-# spdlog
-add_definitions(-DSPDLOG_FMT_EXTERNAL)
-add_subdirectory(submodules/spdlog EXCLUDE_FROM_ALL)
-include_directories(submodules/spdlog/include)
-
-# miniupnp
 set(UPNPC_BUILD_SHARED
     OFF
     CACHE BOOL "")
@@ -704,7 +692,7 @@ add_custom_target(
   executables
   COMMAND echo "BATCH BUILDING node + rpc"
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  DEPENDS nano_node nano_rpc)
+  DEPENDS nanobitcoin_node nanobitcoin_rpc)
 
 if(NANO_FUZZER_TEST)
   if(NOT WIN32)
@@ -747,7 +735,7 @@ if(NANO_TEST OR RAIBLOCKS_TEST)
     all_tests
     COMMAND echo "BATCH BUILDING TESTS"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    DEPENDS core_test load_test rpc_test slow_test nano_node nano_rpc)
+    DEPENDS core_test load_test rpc_test slow_test nanobitcoin_node nanobitcoin_rpc)
 endif()
 
 if(NANO_TEST OR RAIBLOCKS_TEST)
@@ -769,7 +757,6 @@ endif()
 if(NANO_GUI OR RAIBLOCKS_GUI)
   install(FILES ${PROJECT_BINARY_DIR}/config-node.toml.sample DESTINATION .)
   install(FILES ${PROJECT_BINARY_DIR}/config-rpc.toml.sample DESTINATION .)
-  install(FILES ${PROJECT_BINARY_DIR}/config-log.toml.sample DESTINATION .)
   if(WIN32)
     set(PLATFORM_QT_PACKAGES WinExtras)
   else()
@@ -780,6 +767,7 @@ if(NANO_GUI OR RAIBLOCKS_GUI)
 
   add_library(qt nano/qt/qt.cpp nano/qt/qt.hpp)
   include_directories(${CMAKE_SOURCE_DIR}/submodules)
+  include_directories(${CMAKE_SOURCE_DIR}/submodules/cpptoml/include)
 
   target_link_libraries(
     qt
@@ -859,11 +847,11 @@ if(NANO_GUI OR RAIBLOCKS_GUI)
     set(CPACK_GENERATOR "DragNDrop")
     configure_file(${CMAKE_SOURCE_DIR}/Info.plist.in
                    ${CMAKE_SOURCE_DIR}/Info.plist @ONLY)
-    install(TARGETS nano_wallet
+    install(TARGETS nanobitcoin_wallet
             DESTINATION ${NANO_OSX_PACKAGE_NAME}.app/Contents/MacOS)
-    install(TARGETS nano_node
+    install(TARGETS nanobitcoin_node
             DESTINATION ${NANO_OSX_PACKAGE_NAME}.app/Contents/MacOS)
-    install(TARGETS nano_rpc
+    install(TARGETS nanobitcoin_rpc
             DESTINATION ${NANO_OSX_PACKAGE_NAME}.app/Contents/MacOS)
     install(FILES Info.plist DESTINATION ${NANO_OSX_PACKAGE_NAME}.app/Contents)
     install(FILES qt.conf

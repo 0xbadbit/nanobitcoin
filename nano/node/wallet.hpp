@@ -220,17 +220,14 @@ public:
 	bool check_rep (nano::account const &, nano::uint128_t const &, bool const = true);
 	void compute_reps ();
 	void ongoing_compute_reps ();
-	void receive_confirmed (nano::block_hash const & hash_a, nano::account const & destination_a);
 	std::unordered_map<nano::wallet_id, std::shared_ptr<nano::wallet>> get_wallets ();
-	nano::container_info container_info () const;
-
 	nano::network_params & network_params;
 	std::function<void (bool)> observer;
 	std::unordered_map<nano::wallet_id, std::shared_ptr<nano::wallet>> items;
 	std::multimap<nano::uint128_t, std::pair<std::shared_ptr<nano::wallet>, std::function<void (nano::wallet &)>>, std::greater<nano::uint128_t>> actions;
 	nano::locked<std::unordered_map<nano::account, nano::root>> delayed_work;
-	mutable nano::mutex mutex;
-	mutable nano::mutex action_mutex;
+	nano::mutex mutex;
+	nano::mutex action_mutex;
 	nano::condition_variable condition;
 	nano::kdf kdf;
 	MDB_dbi handle;
@@ -251,6 +248,8 @@ private:
 	mutable nano::mutex reps_cache_mutex;
 	nano::wallet_representatives representatives;
 };
+
+std::unique_ptr<container_info_component> collect_container_info (wallets & wallets, std::string const & name);
 
 class wallets_store
 {

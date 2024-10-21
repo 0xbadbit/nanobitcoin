@@ -1,4 +1,3 @@
-#include <nano/lib/blocks.hpp>
 #include <nano/lib/rocksdbconfig.hpp>
 #include <nano/store/rocksdb/iterator.hpp>
 #include <nano/store/rocksdb/rocksdb.hpp>
@@ -35,10 +34,11 @@ private:
 };
 }
 
-nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesystem::path const & path_a, nano::ledger_constants & constants, nano::rocksdb_config const & rocksdb_config_a, bool open_read_only_a) :
+nano::store::rocksdb::component::component (nano::logger_mt & logger_a, std::filesystem::path const & path_a, nano::ledger_constants & constants, nano::rocksdb_config const & rocksdb_config_a, bool open_read_only_a) :
 	// clang-format off
 	nano::store::component{
 		block_store,
+		frontier_store,
 		account_store,
 		pending_store,
 		online_weight_store,
@@ -46,11 +46,11 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 		peer_store,
 		confirmation_height_store,
 		final_vote_store,
-		version_store,
-		rep_weight_store
+		version_store
 	},
 	// clang-format on
 	block_store{ *this },
+	frontier_store{ *this },
 	account_store{ *this },
 	pending_store{ *this },
 	online_weight_store{ *this },
@@ -59,11 +59,10 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 	confirmation_height_store{ *this },
 	final_vote_store{ *this },
 	version_store{ *this },
-	rep_weight_store{ *this },
 	logger{ logger_a },
 	constants{ constants },
 	rocksdb_config{ rocksdb_config_a },
-	max_block_write_batch_num_m{ nano::narrow_cast<unsigned> ((rocksdb_config_a.write_cache * 1024 * 1024) / (2 * (sizeof (nano::block_type) + nano::state_block::size + nano::block_sideband::size (nano::block_type::state)))) },
+	max_block_write_batch_num_m{ nano::narrow_cast<unsigned> (blocks_memtable_size_bytes () / (2 * (sizeof (nano::block_type) + nano::state_block::size + nano::block_sideband::size (nano::block_type::state)))) },
 	cf_name_table_map{ create_cf_name_table_map () }
 {
 	boost::system::error_code error_mkdir, error_chmod;
@@ -79,6 +78,7 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 	debug_assert (path_a.filename () == "rocksdb");
 
 	generate_tombstone_map ();
+	small_table_factory.reset (::rocksdb::NewBlockBasedTableFactory (get_small_table_options ()));
 
 	// TODO: get_db_options () registers a listener for resetting tombstones, needs to check if it is a problem calling it more than once.
 	auto options = get_db_options ();
@@ -95,16 +95,14 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 		auto version_l = version.get (transaction);
 		if (version_l > version_current)
 		{
-			logger.critical (nano::log::type::rocksdb, "The version of the ledger ({}) is too high for this node", version_l);
-
 			error = true;
+			logger.always_log (boost::str (boost::format ("The version of the ledger (%1%) is too high for this node") % version_l));
 			return;
 		}
 		else if (version_l < version_minimum)
 		{
-			logger.critical (nano::log::type::rocksdb, "The version of the ledger ({}) is lower than the minimum ({}) which is supported for upgrades. Either upgrade a node first or delete the ledger.", version_l, version_minimum);
-
 			error = true;
+			logger.always_log (boost::str (boost::format ("The version of the ledger (%1%) is lower than the minimum (%2%) which is supported for upgrades. Either upgrade to a v19, v20 or v21 node first or delete the ledger.") % version_l % version_minimum));
 			return;
 		}
 		is_fully_upgraded = (version_l == version_current);
@@ -115,6 +113,11 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 		// Needs to clear the store references before reopening the DB.
 		handles.clear ();
 		db.reset (nullptr);
+	}
+
+	if (!open_read_only_a)
+	{
+		construct_column_family_mutexes ();
 	}
 
 	if (is_fully_upgraded)
@@ -146,8 +149,7 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 	open (error, path_a, open_read_only_a, options, get_current_column_families (path_a.string (), options));
 	if (!error)
 	{
-		logger.info (nano::log::type::rocksdb, "Upgrade in progress...");
-
+		logger.always_log ("Upgrade in progress...");
 		auto transaction = tx_begin_write ();
 		error |= do_upgrades (transaction);
 	}
@@ -156,6 +158,7 @@ nano::store::rocksdb::component::component (nano::logger & logger_a, std::filesy
 std::unordered_map<char const *, nano::tables> nano::store::rocksdb::component::create_cf_name_table_map () const
 {
 	std::unordered_map<char const *, nano::tables> map{ { ::rocksdb::kDefaultColumnFamilyName.c_str (), tables::default_unused },
+		{ "frontiers", tables::frontiers },
 		{ "accounts", tables::accounts },
 		{ "blocks", tables::blocks },
 		{ "pending", tables::pending },
@@ -165,8 +168,7 @@ std::unordered_map<char const *, nano::tables> nano::store::rocksdb::component::
 		{ "peers", tables::peers },
 		{ "confirmation_height", tables::confirmation_height },
 		{ "pruned", tables::pruned },
-		{ "final_votes", tables::final_votes },
-		{ "rep_weights", tables::rep_weights } };
+		{ "final_votes", tables::final_votes } };
 
 	debug_assert (map.size () == all_tables ().size () + 1);
 	return map;
@@ -186,10 +188,10 @@ void nano::store::rocksdb::component::open (bool & error_a, std::filesystem::pat
 	}
 	else
 	{
-		s = ::rocksdb::TransactionDB::Open (options_a, ::rocksdb::TransactionDBOptions{}, path_a.string (), column_families, &handles_l, &transaction_db);
-		if (transaction_db)
+		s = ::rocksdb::OptimisticTransactionDB::Open (options_a, path_a.string (), column_families, &handles_l, &optimistic_db);
+		if (optimistic_db)
 		{
-			db.reset (transaction_db);
+			db.reset (optimistic_db);
 		}
 	}
 
@@ -203,40 +205,51 @@ void nano::store::rocksdb::component::open (bool & error_a, std::filesystem::pat
 	error_a |= !s.ok ();
 }
 
-bool nano::store::rocksdb::component::do_upgrades (store::write_transaction & transaction)
+bool nano::store::rocksdb::component::do_upgrades (store::write_transaction const & transaction_a)
 {
-	auto error (false);
-	auto version_l = version.get (transaction);
-	if (version_l < version_minimum)
-	{
-		logger.critical (nano::log::type::rocksdb, "The version of the ledger ({}) is lower than the minimum ({}) which is supported for upgrades. Either upgrade a node first or delete the ledger.", version_l, version_minimum);
-		return true;
-	}
+	bool error_l{ false };
+	auto version_l = version.get (transaction_a);
 	switch (version_l)
 	{
+		case 1:
+		case 2:
+		case 3:
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+		case 8:
+		case 9:
+		case 10:
+		case 11:
+		case 12:
+		case 13:
+			release_assert (false && "do_upgrades () for RocksDB requires the version_minimum already checked.");
+			error_l = true;
+			break;
+		case 14:
+		case 15:
+		case 16:
+		case 17:
+		case 18:
+		case 19:
+		case 20:
 		case 21:
-			upgrade_v21_to_v22 (transaction);
+			upgrade_v21_to_v22 (transaction_a);
 			[[fallthrough]];
 		case 22:
-			upgrade_v22_to_v23 (transaction);
-			[[fallthrough]];
-		case 23:
-			upgrade_v23_to_v24 (transaction);
-			[[fallthrough]];
-		case 24:
 			break;
 		default:
-			logger.critical (nano::log::type::rocksdb, "The version of the ledger ({}) is too high for this node", version_l);
-			error = true;
+			logger.always_log (boost::str (boost::format ("The version of the ledger (%1%) is too high for this node") % version_l));
+			error_l = true;
 			break;
 	}
-	return error;
+	return error_l;
 }
 
-void nano::store::rocksdb::component::upgrade_v21_to_v22 (store::write_transaction & transaction)
+void nano::store::rocksdb::component::upgrade_v21_to_v22 (store::write_transaction const & transaction_a)
 {
-	logger.info (nano::log::type::rocksdb, "Upgrading database from v21 to v22...");
-
+	logger.always_log ("Preparing v21 to v22 database upgrade...");
 	if (column_family_exists ("unchecked"))
 	{
 		auto const unchecked_handle = get_column_family ("unchecked");
@@ -251,121 +264,9 @@ void nano::store::rocksdb::component::upgrade_v21_to_v22 (store::write_transacti
 			}
 			return false;
 		});
-		logger.debug (nano::log::type::rocksdb, "Finished removing unchecked table");
 	}
-
-	version.put (transaction, 22);
-
-	logger.info (nano::log::type::rocksdb, "Upgrading database from v21 to v22 completed");
-}
-
-// Fill rep_weights table with all existing representatives and their vote weight
-void nano::store::rocksdb::component::upgrade_v22_to_v23 (store::write_transaction & transaction)
-{
-	logger.info (nano::log::type::rocksdb, "Upgrading database from v22 to v23...");
-
-	if (column_family_exists ("rep_weights"))
-	{
-		logger.info (nano::log::type::rocksdb, "Dropping existing rep_weights table");
-		auto const rep_weights_handle = get_column_family ("rep_weights");
-		db->DropColumnFamily (rep_weights_handle);
-		db->DestroyColumnFamilyHandle (rep_weights_handle);
-		std::erase_if (handles, [rep_weights_handle] (auto & handle) {
-			if (handle.get () == rep_weights_handle)
-			{
-				// The handle resource is deleted by RocksDB.
-				[[maybe_unused]] auto ptr = handle.release ();
-				return true;
-			}
-			return false;
-		});
-		transaction.refresh ();
-	}
-
-	{
-		logger.info (nano::log::type::rocksdb, "Creating table rep_weights");
-		::rocksdb::ColumnFamilyOptions new_cf_options;
-		::rocksdb::ColumnFamilyHandle * new_cf_handle;
-		::rocksdb::Status status = db->CreateColumnFamily (new_cf_options, "rep_weights", &new_cf_handle);
-		release_assert (success (status.code ()));
-		handles.emplace_back (new_cf_handle);
-		transaction.refresh ();
-	}
-
-	release_assert (rep_weight.begin (tx_begin_read ()) == rep_weight.end (), "rep weights table must be empty before upgrading to v23");
-
-	auto iterate_accounts = [this] (auto && func) {
-		auto transaction = tx_begin_read ();
-
-		// Manually create v22 compatible iterator to read accounts
-		auto it = make_iterator<nano::account, nano::account_info_v22> (transaction, tables::accounts);
-		auto const end = store::iterator<nano::account, nano::account_info_v22> (nullptr);
-
-		for (; it != end; ++it)
-		{
-			auto const & account = it->first;
-			auto const & account_info = it->second;
-
-			func (account, account_info);
-		}
-	};
-
-	// TODO: Make this smaller in dev builds
-	const size_t batch_size = 250000;
-
-	size_t processed = 0;
-	iterate_accounts ([this, &transaction, &processed] (nano::account const & account, nano::account_info_v22 const & account_info) {
-		if (!account_info.balance.is_zero ())
-		{
-			nano::uint128_t total{ 0 };
-			nano::store::rocksdb::db_val value;
-			auto status = get (transaction, tables::rep_weights, account_info.representative, value);
-			if (success (status))
-			{
-				total = nano::amount{ value }.number ();
-			}
-			total += account_info.balance.number ();
-			status = put (transaction, tables::rep_weights, account_info.representative, nano::amount{ total });
-			release_assert_success (status);
-		}
-
-		processed++;
-		if (processed % batch_size == 0)
-		{
-			logger.info (nano::log::type::rocksdb, "Processed {} accounts", processed);
-			transaction.refresh (); // Refresh to prevent excessive memory usage
-		}
-	});
-
-	logger.info (nano::log::type::rocksdb, "Done processing {} accounts", processed);
-	version.put (transaction, 23);
-
-	logger.info (nano::log::type::rocksdb, "Upgrading database from v22 to v23 completed");
-}
-
-void nano::store::rocksdb::component::upgrade_v23_to_v24 (store::write_transaction & transaction)
-{
-	logger.info (nano::log::type::rocksdb, "Upgrading database from v23 to v24...");
-
-	if (column_family_exists ("frontiers"))
-	{
-		auto const frontiers_handle = get_column_family ("frontiers");
-		db->DropColumnFamily (frontiers_handle);
-		db->DestroyColumnFamilyHandle (frontiers_handle);
-		std::erase_if (handles, [frontiers_handle] (auto & handle) {
-			if (handle.get () == frontiers_handle)
-			{
-				// The handle resource is deleted by RocksDB.
-				[[maybe_unused]] auto ptr = handle.release ();
-				return true;
-			}
-			return false;
-		});
-		logger.debug (nano::log::type::rocksdb, "Finished removing frontiers table");
-	}
-
-	version.put (transaction, 24);
-	logger.info (nano::log::type::rocksdb, "Upgrading database from v23 to v24 completed");
+	version.put (transaction_a, 22);
+	logger.always_log ("Finished removing unchecked table");
 }
 
 void nano::store::rocksdb::component::generate_tombstone_map ()
@@ -375,16 +276,115 @@ void nano::store::rocksdb::component::generate_tombstone_map ()
 	tombstone_map.emplace (std::piecewise_construct, std::forward_as_tuple (nano::tables::pending), std::forward_as_tuple (0, 25000));
 }
 
+rocksdb::ColumnFamilyOptions nano::store::rocksdb::component::get_common_cf_options (std::shared_ptr<::rocksdb::TableFactory> const & table_factory_a, unsigned long long memtable_size_bytes_a) const
+{
+	::rocksdb::ColumnFamilyOptions cf_options;
+	cf_options.table_factory = table_factory_a;
+
+	// (1 active, 1 inactive)
+	auto num_memtables = 2;
+
+	// Each level is a multiple of the above. If L1 is 512MB. L2 will be 512 * 8 = 2GB. L3 will be 2GB * 8 = 16GB, and so on...
+	cf_options.max_bytes_for_level_multiplier = 8;
+
+	// Although this should be the default provided by RocksDB, not setting this is causing sequence conflict checks if not using
+	cf_options.max_write_buffer_size_to_maintain = memtable_size_bytes_a * num_memtables;
+
+	// Files older than this (1 day) will be scheduled for compaction when there is no other background work. This can lead to more writes however.
+	cf_options.ttl = 1 * 24 * 60 * 60;
+
+	// Multiplier for each level
+	cf_options.target_file_size_multiplier = 10;
+
+	// Size of level 1 sst files
+	cf_options.target_file_size_base = memtable_size_bytes_a;
+
+	// Size of each memtable
+	cf_options.write_buffer_size = memtable_size_bytes_a;
+
+	// Number of memtables to keep in memory
+	cf_options.max_write_buffer_number = num_memtables;
+
+	return cf_options;
+}
+
 rocksdb::ColumnFamilyOptions nano::store::rocksdb::component::get_cf_options (std::string const & cf_name_a) const
 {
 	::rocksdb::ColumnFamilyOptions cf_options;
-	if (cf_name_a != ::rocksdb::kDefaultColumnFamilyName)
+	auto const memtable_size_bytes = base_memtable_size_bytes ();
+	auto const block_cache_size_bytes = 1024ULL * 1024 * rocksdb_config.memory_multiplier * base_block_cache_size;
+	if (cf_name_a == "blocks")
 	{
-		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_table_options ()));
-		cf_options.table_factory = table_factory;
-		// Size of each memtable (write buffer for this column family)
-		cf_options.write_buffer_size = rocksdb_config.write_cache * 1024 * 1024;
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes * 4)));
+		cf_options = get_active_cf_options (table_factory, blocks_memtable_size_bytes ());
 	}
+	else if (cf_name_a == "confirmation_height")
+	{
+		// Entries will not be deleted in the normal case, so can make memtables a lot bigger
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes * 2);
+	}
+	else if (cf_name_a == "meta" || cf_name_a == "online_weight" || cf_name_a == "peers")
+	{
+		// Meta - It contains just version key
+		// Online weight - Periodically deleted
+		// Peers - Cleaned periodically, a lot of deletions. This is never read outside of initializing? Keep this small
+		cf_options = get_small_cf_options (small_table_factory);
+	}
+	else if (cf_name_a == "cached_counts")
+	{
+		// Really small (keys are blocks tables, value is uint64_t)
+		cf_options = get_small_cf_options (small_table_factory);
+	}
+	else if (cf_name_a == "pending")
+	{
+		// Pending can have a lot of deletions too
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes);
+
+		// Number of files in level 0 which triggers compaction. Size of L0 and L1 should be kept similar as this is the only compaction which is single threaded
+		cf_options.level0_file_num_compaction_trigger = 2;
+
+		// L1 size, compaction is triggered for L0 at this size (2 SST files in L1)
+		cf_options.max_bytes_for_level_base = memtable_size_bytes * 2;
+	}
+	else if (cf_name_a == "frontiers")
+	{
+		// Frontiers is only needed during bootstrap for legacy blocks
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes);
+	}
+	else if (cf_name_a == "accounts")
+	{
+		// Can have deletions from rollbacks
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes * 2)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes);
+	}
+	else if (cf_name_a == "vote")
+	{
+		// No deletes it seems, only overwrites.
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes * 2)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes);
+	}
+	else if (cf_name_a == "pruned")
+	{
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes * 2)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes);
+	}
+	else if (cf_name_a == "final_votes")
+	{
+		std::shared_ptr<::rocksdb::TableFactory> table_factory (::rocksdb::NewBlockBasedTableFactory (get_active_table_options (block_cache_size_bytes * 2)));
+		cf_options = get_active_cf_options (table_factory, memtable_size_bytes);
+	}
+	else if (cf_name_a == ::rocksdb::kDefaultColumnFamilyName)
+	{
+		// Do nothing.
+	}
+	else
+	{
+		debug_assert (false);
+	}
+
 	return cf_options;
 }
 
@@ -399,10 +399,24 @@ std::vector<rocksdb::ColumnFamilyDescriptor> nano::store::rocksdb::component::cr
 	return column_families;
 }
 
-nano::store::write_transaction nano::store::rocksdb::component::tx_begin_write ()
+nano::store::write_transaction nano::store::rocksdb::component::tx_begin_write (std::vector<nano::tables> const & tables_requiring_locks_a, std::vector<nano::tables> const & tables_no_locks_a)
 {
-	release_assert (transaction_db != nullptr);
-	return store::write_transaction{ std::make_unique<nano::store::rocksdb::write_transaction_impl> (transaction_db) };
+	std::unique_ptr<nano::store::rocksdb::write_transaction_impl> txn;
+	release_assert (optimistic_db != nullptr);
+	if (tables_requiring_locks_a.empty () && tables_no_locks_a.empty ())
+	{
+		// Use all tables if none are specified
+		txn = std::make_unique<nano::store::rocksdb::write_transaction_impl> (optimistic_db, all_tables (), tables_no_locks_a, write_lock_mutexes);
+	}
+	else
+	{
+		txn = std::make_unique<nano::store::rocksdb::write_transaction_impl> (optimistic_db, tables_requiring_locks_a, tables_no_locks_a, write_lock_mutexes);
+	}
+
+	// Tables must be kept in alphabetical order. These can be used for mutex locking, so order is important to prevent deadlocking
+	debug_assert (std::is_sorted (tables_requiring_locks_a.begin (), tables_requiring_locks_a.end ()));
+
+	return store::write_transaction{ std::move (txn) };
 }
 
 nano::store::read_transaction nano::store::rocksdb::component::tx_begin_read () const
@@ -465,6 +479,8 @@ rocksdb::ColumnFamilyHandle * nano::store::rocksdb::component::table_to_column_f
 {
 	switch (table_a)
 	{
+		case tables::frontiers:
+			return get_column_family ("frontiers");
 		case tables::accounts:
 			return get_column_family ("accounts");
 		case tables::blocks:
@@ -485,8 +501,6 @@ rocksdb::ColumnFamilyHandle * nano::store::rocksdb::component::table_to_column_f
 			return get_column_family ("confirmation_height");
 		case tables::final_votes:
 			return get_column_family ("final_votes");
-		case tables::rep_weights:
-			return get_column_family ("rep_weights");
 		default:
 			release_assert (false);
 			return get_column_family ("");
@@ -644,14 +658,6 @@ uint64_t nano::store::rocksdb::component::count (store::transaction const & tran
 			++sum;
 		}
 	}
-	// rep_weights should only be used in tests otherwise there can be performance issues.
-	else if (table_a == tables::rep_weights)
-	{
-		for (auto i (rep_weight.begin (transaction_a)), n (rep_weight.end ()); i != n; ++i)
-		{
-			++sum;
-		}
-	}
 	else
 	{
 		debug_assert (false);
@@ -706,17 +712,44 @@ int nano::store::rocksdb::component::clear (::rocksdb::ColumnFamilyHandle * colu
 	return status.code ();
 }
 
+void nano::store::rocksdb::component::construct_column_family_mutexes ()
+{
+	for (auto table : all_tables ())
+	{
+		write_lock_mutexes.emplace (std::piecewise_construct, std::forward_as_tuple (table), std::forward_as_tuple ());
+	}
+}
+
 rocksdb::Options nano::store::rocksdb::component::get_db_options ()
 {
 	::rocksdb::Options db_options;
 	db_options.create_if_missing = true;
 	db_options.create_missing_column_families = true;
 
+	// TODO: review if this should be changed due to the unchecked table removal.
+	// Enable whole key bloom filter in memtables for ones with memtable_prefix_bloom_size_ratio set (unchecked table currently).
+	// It can potentially reduce CPU usage for point-look-ups.
+	db_options.memtable_whole_key_filtering = true;
+
+	// Sets the compaction priority
+	db_options.compaction_pri = ::rocksdb::CompactionPri::kMinOverlappingRatio;
+
+	// Start aggressively flushing WAL files when they reach over 1GB
+	db_options.max_total_wal_size = 1 * 1024 * 1024 * 1024LL;
+
 	// Optimize RocksDB. This is the easiest way to get RocksDB to perform well
+	db_options.IncreaseParallelism (rocksdb_config.io_threads);
 	db_options.OptimizeLevelStyleCompaction ();
 
-	// Set max number of threads
-	db_options.IncreaseParallelism (rocksdb_config.io_threads);
+	// Adds a separate write queue for memtable/WAL
+	db_options.enable_pipelined_write = true;
+
+	// Default is 16, setting to -1 allows faster startup times for SSDs by allowings more files to be read in parallel.
+	db_options.max_file_opening_threads = -1;
+
+	// The MANIFEST file contains a history of all file operations since the last time the DB was opened and is replayed during DB open.
+	// Default is 1GB, lowering this to avoid replaying for too long (100MB)
+	db_options.max_manifest_file_size = 100 * 1024 * 1024ULL;
 
 	// Not compressing any SST files for compatibility reasons.
 	db_options.compression = ::rocksdb::kNoCompression;
@@ -729,25 +762,73 @@ rocksdb::Options nano::store::rocksdb::component::get_db_options ()
 	return db_options;
 }
 
-rocksdb::BlockBasedTableOptions nano::store::rocksdb::component::get_table_options () const
+rocksdb::BlockBasedTableOptions nano::store::rocksdb::component::get_active_table_options (std::size_t lru_size) const
 {
 	::rocksdb::BlockBasedTableOptions table_options;
 
 	// Improve point lookup performance be using the data block hash index (uses about 5% more space).
 	table_options.data_block_index_type = ::rocksdb::BlockBasedTableOptions::DataBlockIndexType::kDataBlockBinaryAndHash;
+	table_options.data_block_hash_table_util_ratio = 0.75;
 
-	// Using storage format_version 5.
-	// Version 5 offers improved read spead, caching and better compression (if enabled)
-	// Any existing ledger data in version 4 will not be migrated. New data will be written in version 5.
-	table_options.format_version = 5;
+	// Using format_version=4 significantly reduces the index block size, in some cases around 4-5x.
+	// This frees more space in block cache, which would result in higher hit rate for data and filter blocks,
+	// or offer the same performance with a smaller block cache size.
+	table_options.format_version = 4;
+	table_options.index_block_restart_interval = 16;
 
 	// Block cache for reads
-	table_options.block_cache = ::rocksdb::NewLRUCache (rocksdb_config.read_cache * 1024 * 1024);
+	table_options.block_cache = ::rocksdb::NewLRUCache (lru_size);
 
 	// Bloom filter to help with point reads. 10bits gives 1% false positive rate.
 	table_options.filter_policy.reset (::rocksdb::NewBloomFilterPolicy (10, false));
 
+	// Increasing block_size decreases memory usage and space amplification, but increases read amplification.
+	table_options.block_size = 16 * 1024ULL;
+
+	// Whether level 0 index and filter blocks are stored in block_cache
+	table_options.pin_l0_filter_and_index_blocks_in_cache = true;
+
 	return table_options;
+}
+
+rocksdb::BlockBasedTableOptions nano::store::rocksdb::component::get_small_table_options () const
+{
+	::rocksdb::BlockBasedTableOptions table_options;
+	// Improve point lookup performance be using the data block hash index (uses about 5% more space).
+	table_options.data_block_index_type = ::rocksdb::BlockBasedTableOptions::DataBlockIndexType::kDataBlockBinaryAndHash;
+	table_options.data_block_hash_table_util_ratio = 0.75;
+	table_options.block_size = 1024ULL;
+	return table_options;
+}
+
+rocksdb::ColumnFamilyOptions nano::store::rocksdb::component::get_small_cf_options (std::shared_ptr<::rocksdb::TableFactory> const & table_factory_a) const
+{
+	auto const memtable_size_bytes = 10000;
+	auto cf_options = get_common_cf_options (table_factory_a, memtable_size_bytes);
+
+	// Number of files in level 0 which triggers compaction. Size of L0 and L1 should be kept similar as this is the only compaction which is single threaded
+	cf_options.level0_file_num_compaction_trigger = 1;
+
+	// L1 size, compaction is triggered for L0 at this size (1 SST file in L1)
+	cf_options.max_bytes_for_level_base = memtable_size_bytes;
+
+	return cf_options;
+}
+
+::rocksdb::ColumnFamilyOptions nano::store::rocksdb::component::get_active_cf_options (std::shared_ptr<::rocksdb::TableFactory> const & table_factory_a, unsigned long long memtable_size_bytes_a) const
+{
+	auto cf_options = get_common_cf_options (table_factory_a, memtable_size_bytes_a);
+
+	// Number of files in level 0 which triggers compaction. Size of L0 and L1 should be kept similar as this is the only compaction which is single threaded
+	cf_options.level0_file_num_compaction_trigger = 4;
+
+	// L1 size, compaction is triggered for L0 at this size (4 SST files in L1)
+	cf_options.max_bytes_for_level_base = memtable_size_bytes_a * 4;
+
+	// Size target of levels are changed dynamically based on size of the last level
+	cf_options.level_compaction_dynamic_level_bytes = true;
+
+	return cf_options;
 }
 
 void nano::store::rocksdb::component::on_flush (::rocksdb::FlushJobInfo const & flush_job_info_a)
@@ -761,7 +842,7 @@ void nano::store::rocksdb::component::on_flush (::rocksdb::FlushJobInfo const & 
 
 std::vector<nano::tables> nano::store::rocksdb::component::all_tables () const
 {
-	return std::vector<nano::tables>{ tables::accounts, tables::blocks, tables::confirmation_height, tables::final_votes, tables::meta, tables::online_weight, tables::peers, tables::pending, tables::pruned, tables::vote, tables::rep_weights };
+	return std::vector<nano::tables>{ tables::accounts, tables::blocks, tables::confirmation_height, tables::final_votes, tables::frontiers, tables::meta, tables::online_weight, tables::peers, tables::pending, tables::pruned, tables::vote };
 }
 
 bool nano::store::rocksdb::component::copy_db (std::filesystem::path const & destination_path)
@@ -889,6 +970,16 @@ void nano::store::rocksdb::component::serialize_memory_stats (boost::property_tr
 	// Memory size for the entries residing in block cache.
 	db->GetAggregatedIntProperty (::rocksdb::DB::Properties::kBlockCacheUsage, &val);
 	json.put ("block-cache-usage", val);
+}
+
+unsigned long long nano::store::rocksdb::component::blocks_memtable_size_bytes () const
+{
+	return base_memtable_size_bytes ();
+}
+
+unsigned long long nano::store::rocksdb::component::base_memtable_size_bytes () const
+{
+	return 1024ULL * 1024 * rocksdb_config.memory_multiplier * base_memtable_size;
 }
 
 // This is a ratio of the blocks memtable size to keep total write transaction commit size down.

@@ -2,13 +2,13 @@
 
 set +e
 
-useradd -r nanocurrency
-groupadd -r nanocurrency
+useradd -r nanobitcoin
+groupadd -r nanobitcoin
 
-mkdir -p /var/nanocurrency/Nano
-mkdir -p /var/nanocurrency/NanoBeta
-mkdir -p /var/nanocurrency/NanoTest
-chown -R nanocurrency: /var/nanocurrency
+mkdir -p /var/nanobitcoin/Nanobitcoin
+mkdir -p /var/nanobitcoin/NanobitcoinBeta
+mkdir -p /var/nanobitcoin/NanobitcoinTest
+chown -R nanobitcoin: /var/nanobitcoin
 
 systemctl stop ${NANO_SERVICE} 2>/dev/null
 systemctl disable ${NANO_SERVICE} 2>/dev/null

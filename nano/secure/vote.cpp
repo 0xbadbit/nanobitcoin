@@ -137,11 +137,6 @@ std::chrono::milliseconds nano::vote::duration () const
 	return std::chrono::milliseconds{ 1u << (duration_bits () + 4) };
 }
 
-bool nano::vote::is_final () const
-{
-	return is_final_timestamp (timestamp_m);
-}
-
 void nano::vote::serialize_json (boost::property_tree::ptree & tree) const
 {
 	tree.put ("account", account.to_account ());
@@ -170,9 +165,13 @@ std::string nano::vote::to_json () const
 
 std::string nano::vote::hashes_string () const
 {
-	return nano::util::join (hashes, ", ", [] (auto const & hash) {
-		return hash.to_string ();
-	});
+	std::string result;
+	for (auto const & hash : hashes)
+	{
+		result += hash.to_string ();
+		result += ", ";
+	}
+	return result;
 }
 
 uint64_t nano::vote::packed_timestamp (uint64_t timestamp, uint8_t duration)
@@ -187,10 +186,11 @@ bool nano::vote::is_final_timestamp (uint64_t timestamp)
 	return timestamp == std::numeric_limits<uint64_t>::max ();
 }
 
-void nano::vote::operator() (nano::object_stream & obs) const
+/*
+ * iterate_vote_blocks_as_hash
+ */
+
+nano::block_hash nano::iterate_vote_blocks_as_hash::operator() (nano::block_hash const & item) const
 {
-	obs.write ("account", account);
-	obs.write ("final", is_final_timestamp (timestamp_m));
-	obs.write ("timestamp", timestamp_m);
-	obs.write_range ("hashes", hashes);
+	return item;
 }

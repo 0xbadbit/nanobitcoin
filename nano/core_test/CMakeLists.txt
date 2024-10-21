@@ -1,10 +1,9 @@
 add_executable(
   core_test
-  entry.cpp
+  core_test_main.cc
   fakes/websocket_client.hpp
   fakes/work_peer.hpp
-  active_elections.cpp
-  async.cpp
+  active_transactions.cpp
   backlog.cpp
   block.cpp
   block_store.cpp
@@ -13,8 +12,8 @@ add_executable(
   bootstrap_ascending.cpp
   bootstrap_server.cpp
   cli.cpp
+  confirmation_height.cpp
   confirmation_solicitor.cpp
-  confirming_set.cpp
   conflicts.cpp
   difficulty.cpp
   distributed_work.cpp
@@ -22,30 +21,24 @@ add_executable(
   election_scheduler.cpp
   enums.cpp
   epochs.cpp
-  fair_queue.cpp
+  frontiers_confirmation.cpp
+  gap_cache.cpp
   ipc.cpp
   ledger.cpp
-  ledger_confirm.cpp
+  ledger_walker.cpp
   locks.cpp
-  logging.cpp
+  logger.cpp
   message.cpp
   message_deserializer.cpp
   memory_pool.cpp
   network.cpp
   network_filter.cpp
-  network_functions.cpp
   node.cpp
-  object_stream.cpp
   optimistic_scheduler.cpp
   processing_queue.cpp
   processor_service.cpp
-  rep_crawler.cpp
-  receivable.cpp
-  peer_history.cpp
   peer_container.cpp
-  rep_weight_store.cpp
   scheduler_buckets.cpp
-  stats.cpp
   request_aggregator.cpp
   signal_manager.cpp
   socket.cpp
@@ -72,4 +65,5 @@ target_compile_definitions(
 target_link_libraries(core_test test_common)
 
 include_directories(${CMAKE_SOURCE_DIR}/submodules)
+include_directories(${CMAKE_SOURCE_DIR}/submodules/cpptoml/include)
 include_directories(${CMAKE_SOURCE_DIR}/submodules/gtest/googletest/include)

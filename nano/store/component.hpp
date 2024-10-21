@@ -7,7 +7,6 @@
 #include <nano/store/tables.hpp>
 #include <nano/store/transaction.hpp>
 #include <nano/store/versioning.hpp>
-#include <nano/store/write_queue.hpp>
 
 #include <boost/endian/conversion.hpp>
 #include <boost/polymorphic_cast.hpp>
@@ -22,12 +21,12 @@ namespace store
 	class block;
 	class confirmation_height;
 	class final_vote;
+	class frontier;
 	class online_weight;
 	class peer;
 	class pending;
 	class pruned;
 	class version;
-	class rep_weight;
 }
 class ledger_cache;
 
@@ -45,6 +44,7 @@ namespace store
 		// clang-format off
 	explicit component (
 		nano::store::block &,
+		nano::store::frontier &,
 		nano::store::account &,
 		nano::store::pending &,
 		nano::store::online_weight&,
@@ -52,8 +52,7 @@ namespace store
 		nano::store::peer &,
 		nano::store::confirmation_height &,
 		nano::store::final_vote &,
-		nano::store::version &,
-		nano::store::rep_weight &
+		nano::store::version &
 	);
 		// clang-format on
 		virtual ~component () = default;
@@ -66,11 +65,11 @@ namespace store
 		virtual std::string error_string (int status) const = 0;
 
 		store::block & block;
+		store::frontier & frontier;
 		store::account & account;
 		store::pending & pending;
-		store::rep_weight & rep_weight;
 		static int constexpr version_minimum{ 21 };
-		static int constexpr version_current{ 24 };
+		static int constexpr version_current{ 22 };
 
 	public:
 		store::online_weight & online_weight;
@@ -80,10 +79,6 @@ namespace store
 		store::final_vote & final_vote;
 		store::version & version;
 
-	public: // TODO: Shouldn't be public
-		store::write_queue write_queue;
-
-	public:
 		virtual unsigned max_block_write_batch_num () const = 0;
 
 		virtual bool copy_db (std::filesystem::path const & destination) = 0;
@@ -96,7 +91,7 @@ namespace store
 		virtual bool init_error () const = 0;
 
 		/** Start read-write transaction */
-		virtual write_transaction tx_begin_write () = 0;
+		virtual write_transaction tx_begin_write (std::vector<nano::tables> const & tables_to_lock = {}, std::vector<nano::tables> const & tables_no_lock = {}) = 0;
 
 		/** Start read-only transaction */
 		virtual read_transaction tx_begin_read () const = 0;

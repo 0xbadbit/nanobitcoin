@@ -1,4 +1,3 @@
-#include <nano/lib/blocks.hpp>
 #include <nano/node/transport/inproc.hpp>
 #include <nano/node/vote_processor.hpp>
 #include <nano/test_common/system.hpp>
@@ -32,6 +31,16 @@ TEST (vote_processor, producer_consumer)
 		}
 	};
 
+	auto consumer = [&node, &number_of_votes] () -> void {
+		while (node.vote_processor.total_processed.load () < number_of_votes)
+		{
+			if (node.vote_processor.size () >= number_of_votes / 100)
+			{
+				node.vote_processor.flush ();
+			}
+		}
+	};
+
 	auto monitor = [&node, &number_of_votes, &producer_wins, &consumer_wins] () -> void {
 		while (node.vote_processor.total_processed.load () < number_of_votes)
 		{
@@ -54,6 +63,7 @@ TEST (vote_processor, producer_consumer)
 		producers.emplace_back (producer);
 	}
 
+	std::thread consumer_thread{ consumer };
 	std::thread monitor_thread{ monitor };
 
 	ASSERT_TIMELY (30s, node.vote_processor.total_processed.load () >= number_of_votes);
@@ -62,7 +72,8 @@ TEST (vote_processor, producer_consumer)
 	{
 		producer.join ();
 	}
+	consumer_thread.join ();
 	monitor_thread.join ();
 
-	ASSERT_GT (producer_wins, consumer_wins);
+	ASSERT_TRUE (producer_wins > consumer_wins);
 }

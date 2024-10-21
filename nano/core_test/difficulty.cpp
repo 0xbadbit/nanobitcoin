@@ -32,7 +32,7 @@ TEST (difficultyDeathTest, multipliers)
 	}
 
 	{
-		constexpr uint64_t base = std::numeric_limits<std::uint64_t>::max ();
+		uint64_t base = std::numeric_limits<std::uint64_t>::max ();
 		uint64_t difficulty = 0xffffffffffffff00;
 		double expected_multiplier = 0.00390625;
 
@@ -54,7 +54,7 @@ TEST (difficultyDeathTest, multipliers)
 	// Causes valgrind to be noisy
 	if (!nano::running_within_valgrind ())
 	{
-		uint64_t base = 0xffffffc000000000;
+		uint64_t base = 0xfffffc0000000000;
 		uint64_t difficulty_nil = 0;
 		double multiplier_nil = 0.;
 
@@ -68,8 +68,8 @@ TEST (difficulty, overflow)
 {
 	// Overflow max (attempt to overflow & receive lower difficulty)
 	{
-		constexpr uint64_t base = std::numeric_limits<std::uint64_t>::max (); // Max possible difficulty
-		constexpr uint64_t difficulty = std::numeric_limits<std::uint64_t>::max ();
+		uint64_t base = std::numeric_limits<std::uint64_t>::max (); // Max possible difficulty
+		uint64_t difficulty = std::numeric_limits<std::uint64_t>::max ();
 		double multiplier = 1.001; // Try to increase difficulty above max
 
 		ASSERT_EQ (difficulty, nano::difficulty::from_multiplier (multiplier, base));

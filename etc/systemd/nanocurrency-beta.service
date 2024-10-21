@@ -1,12 +1,12 @@
 [Unit]
-Description=Nano Beta Network Daemon
+Description=Nanobitcoin Beta Network Daemon
 After=network.target
 
 [Service]
 Type=simple
-User=nanocurrency
-WorkingDirectory=/var/nanocurrency/NanoBeta
-ExecStart=/usr/bin/nano_node --daemon --network=beta --data_path=/var/nanocurrency/NanoBeta
+User=nanobitcoin
+WorkingDirectory=/var/nanobitcoin/NanobitcoinBeta
+ExecStart=/usr/bin/nanobitcoin_node --daemon --network=beta --data_path=/var/nanobitcoin/NanobitcoinBeta
 Restart=on-failure
 
 [Install]

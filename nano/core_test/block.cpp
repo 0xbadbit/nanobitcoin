@@ -1,4 +1,3 @@
-#include <nano/lib/blocks.hpp>
 #include <nano/lib/stream.hpp>
 #include <nano/node/common.hpp>
 #include <nano/test_common/testutil.hpp>
@@ -386,7 +385,7 @@ TEST (block, publish_req_serialization)
 				 .balance (200)
 				 .sign (nano::keypair ().prv, 2)
 				 .work (3)
-				 .build ();
+				 .build_shared ();
 	nano::publish req{ nano::dev::network_params.network, block };
 	std::vector<uint8_t> bytes;
 	{
@@ -430,7 +429,7 @@ TEST (state_block, serialization)
 				  .link (4)
 				  .sign (key1.prv, key1.pub)
 				  .work (5)
-				  .build ();
+				  .build_shared ();
 	ASSERT_EQ (key1.pub, block1->hashables.account);
 	ASSERT_EQ (nano::block_hash (1), block1->previous ());
 	ASSERT_EQ (key2.pub, block1->hashables.representative);
@@ -490,7 +489,7 @@ TEST (state_block, hashing)
 				 .link (0)
 				 .sign (key.prv, key.pub)
 				 .work (0)
-				 .build ();
+				 .build_shared ();
 	auto hash (block->hash ());
 	ASSERT_EQ (hash, block->hash ()); // check cache works
 	block->hashables.account.bytes[0] ^= 0x1;
@@ -552,7 +551,7 @@ TEST (block_uniquer, single)
 				  .link (0)
 				  .sign (key.prv, key.pub)
 				  .work (0)
-				  .build ();
+				  .build_shared ();
 	auto block2 (std::make_shared<nano::state_block> (*block1));
 	ASSERT_NE (block1, block2);
 	ASSERT_EQ (*block1, *block2);
@@ -579,7 +578,7 @@ TEST (block_uniquer, cleanup)
 				  .link (0)
 				  .sign (key.prv, key.pub)
 				  .work (0)
-				  .build ();
+				  .build_shared ();
 	auto block2 = builder
 				  .make_block ()
 				  .account (0)
@@ -589,7 +588,7 @@ TEST (block_uniquer, cleanup)
 				  .link (0)
 				  .sign (key.prv, key.pub)
 				  .work (1)
-				  .build ();
+				  .build_shared ();
 
 	nano::block_uniquer uniquer;
 	auto block3 = uniquer.unique (block1);
@@ -608,10 +607,10 @@ TEST (block_builder, from)
 	nano::block_builder builder;
 	auto block = builder
 				 .state ()
-				 .account_address ("xrb_15nhh1kzw3x8ohez6s75wy3jr6dqgq65oaede1fzk5hqxk4j8ehz7iqtb3to")
+				 .account_address ("btc_15nhh1kzw3x8ohez6s75wy3jr6dqgq65oaede1fzk5hqxk4j8ehz7iqtb3to")
 				 .previous_hex ("FEFBCE274E75148AB31FF63EFB3082EF1126BF72BF3FA9C76A97FD5A9F0EBEC5")
 				 .balance_dec ("2251569974100400000000000000000000")
-				 .representative_address ("xrb_1stofnrxuz3cai7ze75o174bpm7scwj9jn3nxsn8ntzg784jf1gzn1jjdkou")
+				 .representative_address ("btc_1stofnrxuz3cai7ze75o174bpm7scwj9jn3nxsn8ntzg784jf1gzn1jjdkou")
 				 .link_hex ("E16DD58C1EFA8B521545B0A74375AA994D9FC43828A4266D75ECF57F07A7EE86")
 				 .build (ec);
 	ASSERT_EQ (block->hash ().to_string (), "2D243F8F92CDD0AD94A1D456A6B15F3BE7A6FCBD98D4C5831D06D15C818CD81F");
@@ -637,9 +636,9 @@ TEST (block_builder, zeroed_state_block)
 							 .link (0)
 							 .sign (key.prv, key.pub)
 							 .work (0)
-							 .build ();
+							 .build_shared ();
 	auto zero_block_build = builder.state ().zero ().sign (key.prv, key.pub).build ();
-	ASSERT_EQ (zero_block_manual->hash (), zero_block_build->hash ());
+	ASSERT_TRUE (zero_block_manual->hash () == zero_block_build->hash ());
 	ASSERT_FALSE (nano::validate_message (key.pub, zero_block_build->hash (), zero_block_build->signature));
 }
 
@@ -650,16 +649,16 @@ TEST (block_builder, state)
 	nano::block_builder builder;
 	auto block = builder
 				 .state ()
-				 .account_address ("xrb_15nhh1kzw3x8ohez6s75wy3jr6dqgq65oaede1fzk5hqxk4j8ehz7iqtb3to")
+				 .account_address ("btc_15nhh1kzw3x8ohez6s75wy3jr6dqgq65oaede1fzk5hqxk4j8ehz7iqtb3to")
 				 .previous_hex ("FEFBCE274E75148AB31FF63EFB3082EF1126BF72BF3FA9C76A97FD5A9F0EBEC5")
 				 .balance_dec ("2251569974100400000000000000000000")
-				 .representative_address ("xrb_1stofnrxuz3cai7ze75o174bpm7scwj9jn3nxsn8ntzg784jf1gzn1jjdkou")
+				 .representative_address ("btc_1stofnrxuz3cai7ze75o174bpm7scwj9jn3nxsn8ntzg784jf1gzn1jjdkou")
 				 .link_hex ("E16DD58C1EFA8B521545B0A74375AA994D9FC43828A4266D75ECF57F07A7EE86")
 				 .build (ec);
 	ASSERT_EQ (block->hash ().to_string (), "2D243F8F92CDD0AD94A1D456A6B15F3BE7A6FCBD98D4C5831D06D15C818CD81F");
-	ASSERT_FALSE (block->source_field ());
-	ASSERT_FALSE (block->destination_field ());
-	ASSERT_EQ (block->link_field ().value ().to_string (), "E16DD58C1EFA8B521545B0A74375AA994D9FC43828A4266D75ECF57F07A7EE86");
+	ASSERT_TRUE (block->source ().is_zero ());
+	ASSERT_TRUE (block->destination ().is_zero ());
+	ASSERT_EQ (block->link ().to_string (), "E16DD58C1EFA8B521545B0A74375AA994D9FC43828A4266D75ECF57F07A7EE86");
 }
 
 TEST (block_builder, state_missing_rep)
@@ -669,7 +668,7 @@ TEST (block_builder, state_missing_rep)
 	nano::block_builder builder;
 	auto block = builder
 				 .state ()
-				 .account_address ("xrb_15nhh1kzw3x8ohez6s75wy3jr6dqgq65oaede1fzk5hqxk4j8ehz7iqtb3to")
+				 .account_address ("btc_15nhh1kzw3x8ohez6s75wy3jr6dqgq65oaede1fzk5hqxk4j8ehz7iqtb3to")
 				 .previous_hex ("FEFBCE274E75148AB31FF63EFB3082EF1126BF72BF3FA9C76A97FD5A9F0EBEC5")
 				 .balance_dec ("2251569974100400000000000000000000")
 				 .link_hex ("E16DD58C1EFA8B521545B0A74375AA994D9FC43828A4266D75ECF57F07A7EE86")
@@ -711,10 +710,10 @@ TEST (block_builder, state_errors)
 	nano::block_builder builder;
 
 	// Ensure the proper error is generated
-	builder.state ().account_hex ("xrb_bad").build (ec);
+	builder.state ().account_hex ("btc_bad").build (ec);
 	ASSERT_EQ (ec, nano::error_common::bad_account_number);
 
-	builder.state ().zero ().account_address ("xrb_1111111111111111111111111111111111111111111111111111hifc8npp").build (ec);
+	builder.state ().zero ().account_address ("btc_1111111111111111111111111111111111111111111111111111hifc8npp").build (ec);
 	ASSERT_NO_ERROR (ec);
 }
 
@@ -725,14 +724,14 @@ TEST (block_builder, open)
 	nano::block_builder builder;
 	auto block = builder
 				 .open ()
-				 .account_address ("xrb_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3")
-				 .representative_address ("xrb_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3")
-				 .source_hex ("E89208DD038FBB269987689621D52292AE9C35941A7484756ECCED92A65093BA")
+				 .account_address ("btc_3btc51dcj7onzge6fobg81ho6fhgy833iupqijtorhd8rhqdaaiond6hyndp")
+				 .representative_address ("btc_3btc51dcj7onzge6fobg81ho6fhgy833iupqijtorhd8rhqdaaiond6hyndp")
+				 .source_hex ("A74A1816A896B4FB9846D52E301F5235EEF182186ED784755C3D66C3EEB42215")
 				 .build (ec);
-	ASSERT_EQ (block->hash ().to_string (), "991CF190094C00F0B68E2E5F75F6BEE95A2E0BD93CEAA4A6734DB9F19B728948");
-	ASSERT_EQ (block->source_field ().value ().to_string (), "E89208DD038FBB269987689621D52292AE9C35941A7484756ECCED92A65093BA");
-	ASSERT_FALSE (block->destination_field ());
-	ASSERT_FALSE (block->link_field ());
+	ASSERT_EQ (block->hash ().to_string (), "2C98D70A6B26112574043D9E319A82EB7F7903CDEFF171EDBAF0842C1C18ECDB");
+	ASSERT_EQ (block->source ().to_string (), "A74A1816A896B4FB9846D52E301F5235EEF182186ED784755C3D66C3EEB42215");
+	ASSERT_TRUE (block->destination ().is_zero ());
+	ASSERT_TRUE (block->link ().is_zero ());
 }
 
 TEST (block_builder, open_equality)
@@ -765,13 +764,13 @@ TEST (block_builder, change)
 	nano::block_builder builder;
 	auto block = builder
 				 .change ()
-				 .representative_address ("xrb_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf")
+				 .representative_address ("btc_3rropjiqfxpmrrkooej4qtmm1pueu36f9ghinpho4esfdor8785a455d16nf")
 				 .previous_hex ("088EE46429CA936F76C4EAA20B97F6D33E5D872971433EE0C1311BCB98764456")
 				 .build (ec);
 	ASSERT_EQ (block->hash ().to_string (), "13552AC3928E93B5C6C215F61879358E248D4A5246B8B3D1EEC5A566EDCEE077");
-	ASSERT_FALSE (block->source_field ());
-	ASSERT_FALSE (block->destination_field ());
-	ASSERT_FALSE (block->link_field ());
+	ASSERT_TRUE (block->source ().is_zero ());
+	ASSERT_TRUE (block->destination ().is_zero ());
+	ASSERT_TRUE (block->link ().is_zero ());
 }
 
 TEST (block_builder, change_equality)
@@ -803,14 +802,14 @@ TEST (block_builder, send)
 	nano::block_builder builder;
 	auto block = builder
 				 .send ()
-				 .destination_address ("xrb_1gys8r4crpxhp94n4uho5cshaho81na6454qni5gu9n53gksoyy1wcd4udyb")
+				 .destination_address ("btc_1gys8r4crpxhp94n4uho5cshaho81na6454qni5gu9n53gksoyy1wcd4udyb")
 				 .previous_hex ("F685856D73A488894F7F3A62BC3A88E17E985F9969629FF3FDD4A0D4FD823F24")
 				 .balance_hex ("00F035A9C7D818E7C34148C524FFFFEE")
 				 .build (ec);
 	ASSERT_EQ (block->hash ().to_string (), "4560E7B1F3735D082700CFC2852F5D1F378F7418FD24CEF1AD45AB69316F15CD");
-	ASSERT_FALSE (block->source_field ());
-	ASSERT_EQ (block->destination_field ().value ().to_account (), "nano_1gys8r4crpxhp94n4uho5cshaho81na6454qni5gu9n53gksoyy1wcd4udyb");
-	ASSERT_FALSE (block->link_field ());
+	ASSERT_TRUE (block->source ().is_zero ());
+	ASSERT_EQ (block->destination ().to_account (), "btc_1gys8r4crpxhp94n4uho5cshaho81na6454qni5gu9n53gksoyy1wcd4udyb");
+	ASSERT_TRUE (block->link ().is_zero ());
 }
 
 TEST (block_builder, send_equality)
@@ -870,7 +869,7 @@ TEST (block_builder, receive)
 				 .source_hex ("7B2B0A29C1B235FDF9B4DEF2984BB3573BD1A52D28246396FBB3E4C5FE662135")
 				 .build (ec);
 	ASSERT_EQ (block->hash ().to_string (), "6C004BF911D9CF2ED75CF6EC45E795122AD5D093FF5A83EDFBA43EC4A3EDC722");
-	ASSERT_EQ (block->source_field ().value ().to_string (), "7B2B0A29C1B235FDF9B4DEF2984BB3573BD1A52D28246396FBB3E4C5FE662135");
-	ASSERT_FALSE (block->destination_field ());
-	ASSERT_FALSE (block->link_field ());
+	ASSERT_EQ (block->source ().to_string (), "7B2B0A29C1B235FDF9B4DEF2984BB3573BD1A52D28246396FBB3E4C5FE662135");
+	ASSERT_TRUE (block->destination ().is_zero ());
+	ASSERT_TRUE (block->link ().is_zero ());
 }

@@ -22,11 +22,8 @@ class stats;
 class unchecked_map
 {
 public:
-	unchecked_map (unsigned const max_unchecked_blocks, nano::stats &, bool const & do_delete);
+	unchecked_map (nano::stats &, bool const & do_delete);
 	~unchecked_map ();
-
-	void start ();
-	void stop ();
 
 	void put (nano::hash_or_account const & dependency, nano::unchecked_info const & info);
 	void for_each (
@@ -37,17 +34,14 @@ public:
 	bool exists (nano::unchecked_key const & key) const;
 	void del (nano::unchecked_key const & key);
 	void clear ();
+	std::size_t count () const;
+	void stop ();
+	void flush ();
 
 	/**
 	 * Trigger requested dependencies
 	 */
 	void trigger (nano::hash_or_account const & dependency);
-
-	size_t count () const; // Same as `entries_size ()`
-	size_t entries_size () const;
-	size_t queries_size () const;
-
-	nano::container_info container_info () const;
 
 public: // Events
 	nano::observer_set<nano::unchecked_info const &> satisfied;
@@ -64,15 +58,14 @@ private:
 	std::deque<nano::hash_or_account> buffer;
 	std::deque<nano::hash_or_account> back_buffer;
 	bool writing_back_buffer{ false };
-
 	bool stopped{ false };
 	nano::condition_variable condition;
-	mutable nano::mutex mutex; // Protects queries
+	nano::mutex mutex;
 	std::thread thread;
 
-	unsigned const max_unchecked_blocks;
-
 	void process_queries (decltype (buffer) const & back_buffer);
+
+	static std::size_t constexpr mem_block_count_max = 64 * 1024;
 
 private:
 	struct entry
@@ -93,6 +86,9 @@ private:
 	// clang-format on
 	ordered_unchecked entries;
 
-	mutable std::recursive_mutex entries_mutex; // Protects entries
+	mutable std::recursive_mutex entries_mutex;
+
+public: // Container info
+	std::unique_ptr<nano::container_info_component> collect_container_info (std::string const & name);
 };
 }

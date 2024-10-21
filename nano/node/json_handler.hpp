@@ -10,11 +10,6 @@
 #include <functional>
 #include <string>
 
-namespace nano::secure
-{
-class transaction;
-}
-
 namespace nano
 {
 namespace ipc
@@ -51,7 +46,6 @@ public:
 	void accounts_pending ();
 	void accounts_receivable ();
 	void active_difficulty ();
-	void election_statistics ();
 	void available_supply ();
 	void block_info ();
 	void block_confirm ();
@@ -70,6 +64,7 @@ public:
 	void confirmation_history ();
 	void confirmation_info ();
 	void confirmation_quorum ();
+	void confirmation_height_currently_processing ();
 	void debug_bootstrap_priority_info ();
 	void database_txn_tracker ();
 	void delegators ();
@@ -81,8 +76,8 @@ public:
 	void key_create ();
 	void key_expand ();
 	void ledger ();
-	void mnano_to_raw (nano::uint128_t = nano::nano_ratio);
-	void mnano_from_raw (nano::uint128_t = nano::nano_ratio);
+	void mnano_to_raw (nano::uint128_t = nano::Mbtc_ratio);
+	void mnano_from_raw (nano::uint128_t = nano::Mbtc_ratio);
 	void nano_to_raw ();
 	void raw_to_nano ();
 	void node_id ();
@@ -163,7 +158,7 @@ public:
 	bool wallet_locked_impl (store::transaction const &, std::shared_ptr<nano::wallet> const &);
 	bool wallet_account_impl (store::transaction const &, std::shared_ptr<nano::wallet> const &, nano::account const &);
 	nano::account account_impl (std::string = "", std::error_code = nano::error_common::bad_account_number);
-	nano::account_info account_info_impl (secure::transaction const &, nano::account const &);
+	nano::account_info account_info_impl (store::transaction const &, nano::account const &);
 	nano::amount amount_impl ();
 	std::shared_ptr<nano::block> block_impl (bool = true);
 	nano::block_hash hash_impl (std::string = "hash");

@@ -1,105 +1,110 @@
 #include <nano/lib/tomlconfig.hpp>
-#include <nano/node/election.hpp>
 #include <nano/node/node.hpp>
 #include <nano/node/vote_cache.hpp>
-#include <nano/node/vote_router.hpp>
-
-#include <ranges>
 
 /*
- * entvote_cache_entryry
+ * entry
  */
 
-nano::vote_cache_entry::vote_cache_entry (const nano::block_hash & hash) :
+nano::vote_cache::entry::entry (const nano::block_hash & hash) :
 	hash_m{ hash }
 {
 }
 
-bool nano::vote_cache_entry::vote (std::shared_ptr<nano::vote> const & vote, const nano::uint128_t & rep_weight, std::size_t max_voters)
+bool nano::vote_cache::entry::vote (const nano::account & representative, const uint64_t & timestamp, const nano::uint128_t & rep_weight, std::size_t max_voters)
 {
-	bool updated = vote_impl (vote, rep_weight, max_voters);
+	bool updated = vote_impl (representative, timestamp, rep_weight, max_voters);
 	if (updated)
 	{
-		auto [tally, final_tally] = calculate_tally ();
-		tally_m = tally;
-		final_tally_m = final_tally;
 		last_vote_m = std::chrono::steady_clock::now ();
 	}
 	return updated;
 }
 
-bool nano::vote_cache_entry::vote_impl (std::shared_ptr<nano::vote> const & vote, const nano::uint128_t & rep_weight, std::size_t max_voters)
+bool nano::vote_cache::entry::vote_impl (const nano::account & representative, const uint64_t & timestamp, const nano::uint128_t & rep_weight, std::size_t max_voters)
 {
-	auto const representative = vote->account;
-
-	if (auto existing = voters.find (representative); existing != voters.end ())
+	auto existing = std::find_if (voters_m.begin (), voters_m.end (), [&representative] (auto const & item) { return item.representative == representative; });
+	if (existing != voters_m.end ())
 	{
 		// We already have a vote from this rep
 		// Update timestamp if newer but tally remains unchanged as we already counted this rep weight
 		// It is not essential to keep tally up to date if rep voting weight changes, elections do tally calculations independently, so in the worst case scenario only our queue ordering will be a bit off
-		if (vote->timestamp () > existing->vote->timestamp ())
+		if (timestamp > existing->timestamp)
 		{
-			bool was_final = existing->vote->is_final ();
-			voters.modify (existing, [&vote, &rep_weight] (auto & existing) {
-				existing.vote = vote;
-				existing.weight = rep_weight;
-			});
-			return !was_final && vote->is_final (); // Tally changed only if the vote became final
+			existing->timestamp = timestamp;
+			if (nano::vote::is_final_timestamp (timestamp))
+			{
+				final_tally_m += rep_weight;
+			}
+			return true;
+		}
+		else
+		{
+			return false;
 		}
 	}
 	else
 	{
-		auto should_add = [&, this] () {
-			if (voters.size () < max_voters)
-			{
-				return true;
-			}
-			else
-			{
-				release_assert (!voters.empty ());
-				auto const & min_weight = voters.get<tag_weight> ().begin ()->weight;
-				return rep_weight > min_weight;
-			}
-		};
-
-		// Vote from a new representative, add it to the list and update tally
-		if (should_add ())
+		// Vote from an unseen representative, add to list and update tally
+		if (voters_m.size () < max_voters)
 		{
-			voters.insert ({ representative, rep_weight, vote });
-
-			// If we have reached the maximum number of voters, remove the lowest weight voter
-			if (voters.size () >= max_voters)
+			voters_m.push_back ({ representative, timestamp });
+			tally_m += rep_weight;
+			if (nano::vote::is_final_timestamp (timestamp))
 			{
-				release_assert (!voters.empty ());
-				voters.get<tag_weight> ().erase (voters.get<tag_weight> ().begin ());
+				final_tally_m += rep_weight;
 			}
-
 			return true;
 		}
+		else
+		{
+			return false;
+		}
 	}
-	return false; // Tally unchanged
 }
 
-std::size_t nano::vote_cache_entry::size () const
+std::size_t nano::vote_cache::entry::fill (std::shared_ptr<nano::election> const & election) const
 {
-	return voters.size ();
-}
-
-auto nano::vote_cache_entry::calculate_tally () const -> std::pair<nano::uint128_t, nano::uint128_t>
-{
-	nano::uint128_t tally{ 0 }, final_tally{ 0 };
-	for (auto const & voter : voters)
+	std::size_t inserted = 0;
+	for (const auto & entry : voters_m)
 	{
-		tally += voter.weight;
-		final_tally += voter.vote->is_final () ? voter.weight : 0;
+		auto [is_replay, processed] = election->vote (entry.representative, entry.timestamp, hash_m, nano::election::vote_source::cache);
+		if (processed)
+		{
+			inserted++;
+		}
 	}
-	return { tally, final_tally };
+	return inserted;
 }
 
-std::vector<std::shared_ptr<nano::vote>> nano::vote_cache_entry::votes () const
+std::size_t nano::vote_cache::entry::size () const
 {
-	auto r = voters | std::views::transform ([] (auto const & item) { return item.vote; });
-	return { r.begin (), r.end () };
+	return voters_m.size ();
+}
+
+nano::block_hash nano::vote_cache::entry::hash () const
+{
+	return hash_m;
+}
+
+nano::uint128_t nano::vote_cache::entry::tally () const
+{
+	return tally_m;
+}
+
+nano::uint128_t nano::vote_cache::entry::final_tally () const
+{
+	return final_tally_m;
+}
+
+std::vector<nano::vote_cache::entry::voter_entry> nano::vote_cache::entry::voters () const
+{
+	return voters_m;
+}
+
+std::chrono::steady_clock::time_point nano::vote_cache::entry::last_vote () const
+{
+	return last_vote_m;
 }
 
 /*
@@ -108,56 +113,29 @@ std::vector<std::shared_ptr<nano::vote>> nano::vote_cache_entry::votes () const
 
 nano::vote_cache::vote_cache (vote_cache_config const & config_a, nano::stats & stats_a) :
 	config{ config_a },
-	stats{ stats_a }
+	stats{ stats_a },
+	cleanup_interval{ config_a.age_cutoff / 2 }
 {
 }
 
-void nano::vote_cache::insert (std::shared_ptr<nano::vote> const & vote, std::unordered_map<nano::block_hash, nano::vote_code> const & results)
+void nano::vote_cache::vote (const nano::block_hash & hash, const std::shared_ptr<nano::vote> vote)
 {
-	// Results map should be empty or have the same hashes as the vote
-	debug_assert (results.empty () || std::all_of (vote->hashes.begin (), vote->hashes.end (), [&results] (auto const & hash) { return results.find (hash) != results.end (); }));
+	// Assert that supplied hash corresponds to a one of the hashes stored in vote
+	debug_assert (std::find (vote->hashes.begin (), vote->hashes.end (), hash) != vote->hashes.end ());
 
 	auto const representative = vote->account;
+	auto const timestamp = vote->timestamp ();
 	auto const rep_weight = rep_weight_query (representative);
 
-	nano::lock_guard<nano::mutex> lock{ mutex };
+	nano::unique_lock<nano::mutex> lock{ mutex };
 
-	// Cache votes with a corresponding active election (indicated by `vote_code::vote`) in case that election gets dropped
-	auto filter = [] (auto code) {
-		return code == nano::vote_code::vote || code == nano::vote_code::indeterminate;
-	};
-
-	// If results map is empty, insert all hashes (meant for testing)
-	if (results.empty ())
-	{
-		for (auto const & hash : vote->hashes)
-		{
-			insert_impl (vote, hash, rep_weight);
-		}
-	}
-	else
-	{
-		for (auto const & [hash, code] : results)
-		{
-			if (filter (code))
-			{
-				insert_impl (vote, hash, rep_weight);
-			}
-		}
-	}
-}
-
-void nano::vote_cache::insert_impl (std::shared_ptr<nano::vote> const & vote, nano::block_hash const & hash, nano::uint128_t const & rep_weight)
-{
-	debug_assert (!mutex.try_lock ());
-	debug_assert (std::any_of (vote->hashes.begin (), vote->hashes.end (), [&hash] (auto const & vote_hash) { return vote_hash == hash; }));
-
-	if (auto existing = cache.find (hash); existing != cache.end ())
+	auto & cache_by_hash = cache.get<tag_hash> ();
+	if (auto existing = cache_by_hash.find (hash); existing != cache_by_hash.end ())
 	{
 		stats.inc (nano::stat::type::vote_cache, nano::stat::detail::update);
 
-		cache.modify (existing, [this, &vote, &rep_weight] (entry & ent) {
-			ent.vote (vote, rep_weight, config.max_voters);
+		cache_by_hash.modify (existing, [this, &representative, &timestamp, &rep_weight] (entry & ent) {
+			ent.vote (representative, timestamp, rep_weight, config.max_voters);
 		});
 	}
 	else
@@ -165,10 +143,11 @@ void nano::vote_cache::insert_impl (std::shared_ptr<nano::vote> const & vote, na
 		stats.inc (nano::stat::type::vote_cache, nano::stat::detail::insert);
 
 		entry cache_entry{ hash };
-		cache_entry.vote (vote, rep_weight, config.max_voters);
-		cache.insert (cache_entry);
+		cache_entry.vote (representative, timestamp, rep_weight, config.max_voters);
 
-		// Remove the oldest entry if we have reached the capacity limit
+		cache.get<tag_hash> ().insert (cache_entry);
+
+		// When cache overflown remove the oldest entry
 		if (cache.size () > config.max_size)
 		{
 			cache.get<tag_sequenced> ().pop_front ();
@@ -188,14 +167,14 @@ std::size_t nano::vote_cache::size () const
 	return cache.size ();
 }
 
-std::vector<std::shared_ptr<nano::vote>> nano::vote_cache::find (const nano::block_hash & hash) const
+std::optional<nano::vote_cache::entry> nano::vote_cache::find (const nano::block_hash & hash) const
 {
 	nano::lock_guard<nano::mutex> lock{ mutex };
 
 	auto & cache_by_hash = cache.get<tag_hash> ();
 	if (auto existing = cache_by_hash.find (hash); existing != cache_by_hash.end ())
 	{
-		return existing->votes ();
+		return *existing;
 	}
 	return {};
 }
@@ -220,27 +199,26 @@ void nano::vote_cache::clear ()
 	cache.clear ();
 }
 
-std::deque<nano::vote_cache::top_entry> nano::vote_cache::top (const nano::uint128_t & min_tally)
+std::vector<nano::vote_cache::top_entry> nano::vote_cache::top (const nano::uint128_t & min_tally)
 {
 	stats.inc (nano::stat::type::vote_cache, nano::stat::detail::top);
 
-	std::deque<top_entry> results;
+	std::vector<top_entry> results;
 	{
 		nano::lock_guard<nano::mutex> lock{ mutex };
 
-		if (cleanup_interval.elapsed (config.age_cutoff / 2))
+		if (cleanup_interval.elapsed ())
 		{
 			cleanup ();
 		}
 
 		for (auto & entry : cache.get<tag_tally> ())
 		{
-			auto tally = entry.tally ();
-			if (tally < min_tally)
+			if (entry.tally () < min_tally)
 			{
 				break;
 			}
-			results.push_back ({ entry.hash (), tally, entry.final_tally () });
+			results.push_back ({ entry.hash (), entry.tally (), entry.final_tally () });
 		}
 	}
 
@@ -272,13 +250,11 @@ void nano::vote_cache::cleanup ()
 	});
 }
 
-nano::container_info nano::vote_cache::container_info () const
+std::unique_ptr<nano::container_info_component> nano::vote_cache::collect_container_info (const std::string & name) const
 {
-	nano::lock_guard<nano::mutex> guard{ mutex };
-
-	nano::container_info info;
-	info.put ("cache", cache);
-	return info;
+	auto composite = std::make_unique<container_info_composite> (name);
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "cache", size (), sizeof (ordered_cache::value_type) }));
+	return composite;
 }
 
 /*

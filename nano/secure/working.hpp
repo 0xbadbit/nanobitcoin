@@ -4,5 +4,5 @@
 
 namespace nano
 {
-std::filesystem::path app_path_impl ();
+std::filesystem::path app_path ();
 }

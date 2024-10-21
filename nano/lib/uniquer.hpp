@@ -27,7 +27,7 @@ public:
 
 		nano::lock_guard<nano::mutex> guard{ mutex };
 
-		if (cleanup_interval.elapsed (cleanup_cutoff))
+		if (cleanup_interval.elapsed ())
 		{
 			cleanup ();
 		}
@@ -51,13 +51,13 @@ public:
 		return values.size ();
 	}
 
-	nano::container_info container_info () const
+	std::unique_ptr<container_info_component> collect_container_info (std::string const & name) const
 	{
 		nano::lock_guard<nano::mutex> guard{ mutex };
 
-		nano::container_info info;
-		info.put ("cache", values);
-		return info;
+		auto composite = std::make_unique<container_info_composite> (name);
+		composite->add_component (std::make_unique<container_info_leaf> (container_info{ "cache", values.size (), sizeof (Value) }));
+		return composite;
 	}
 
 	static std::chrono::milliseconds constexpr cleanup_cutoff{ 500 };
@@ -75,6 +75,6 @@ private:
 private:
 	mutable nano::mutex mutex;
 	std::unordered_map<Key, std::weak_ptr<Value>> values;
-	nano::interval cleanup_interval;
+	nano::interval cleanup_interval{ cleanup_cutoff };
 };
 }

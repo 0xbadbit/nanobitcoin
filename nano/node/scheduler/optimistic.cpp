@@ -1,15 +1,9 @@
-#include <nano/lib/blocks.hpp>
 #include <nano/lib/stats.hpp>
 #include <nano/lib/tomlconfig.hpp>
-#include <nano/node/active_elections.hpp>
-#include <nano/node/election_behavior.hpp>
 #include <nano/node/node.hpp>
 #include <nano/node/scheduler/optimistic.hpp>
-#include <nano/secure/ledger.hpp>
-#include <nano/secure/ledger_set_any.hpp>
-#include <nano/secure/ledger_set_confirmed.hpp>
 
-nano::scheduler::optimistic::optimistic (optimistic_config const & config_a, nano::node & node_a, nano::ledger & ledger_a, nano::active_elections & active_a, nano::network_constants const & network_constants_a, nano::stats & stats_a) :
+nano::scheduler::optimistic::optimistic (optimistic_config const & config_a, nano::node & node_a, nano::ledger & ledger_a, nano::active_transactions & active_a, nano::network_constants const & network_constants_a, nano::stats & stats_a) :
 	config{ config_a },
 	node{ node_a },
 	ledger{ ledger_a },
@@ -27,12 +21,12 @@ nano::scheduler::optimistic::~optimistic ()
 
 void nano::scheduler::optimistic::start ()
 {
-	debug_assert (!thread.joinable ());
-
 	if (!config.enabled)
 	{
 		return;
 	}
+
+	debug_assert (!thread.joinable ());
 
 	thread = std::thread{ [this] () {
 		nano::thread_role::set (nano::thread_role::name::scheduler_optimistic);
@@ -129,7 +123,7 @@ void nano::scheduler::optimistic::run ()
 
 		if (predicate ())
 		{
-			auto transaction = ledger.tx_begin_read ();
+			auto transaction = ledger.store.tx_begin_read ();
 
 			while (predicate ())
 			{
@@ -151,13 +145,13 @@ void nano::scheduler::optimistic::run ()
 	}
 }
 
-void nano::scheduler::optimistic::run_one (secure::transaction const & transaction, entry const & candidate)
+void nano::scheduler::optimistic::run_one (store::transaction const & transaction, entry const & candidate)
 {
-	auto block = ledger.any.block_get (transaction, ledger.any.account_head (transaction, candidate.account));
+	auto block = ledger.head_block (transaction, candidate.account);
 	if (block)
 	{
 		// Ensure block is not already confirmed
-		if (!node.block_confirmed_or_being_confirmed (transaction, block->hash ()))
+		if (!node.block_confirmed_or_being_confirmed (block->hash ()))
 		{
 			// Try to insert it into AEC
 			// We check for AEC vacancy inside our predicate
@@ -168,13 +162,13 @@ void nano::scheduler::optimistic::run_one (secure::transaction const & transacti
 	}
 }
 
-nano::container_info nano::scheduler::optimistic::container_info () const
+std::unique_ptr<nano::container_info_component> nano::scheduler::optimistic::collect_container_info (const std::string & name) const
 {
 	nano::lock_guard<nano::mutex> guard{ mutex };
 
-	nano::container_info info;
-	info.put ("candidates", candidates);
-	return info;
+	auto composite = std::make_unique<container_info_composite> (name);
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "candidates", candidates.size (), sizeof (decltype (candidates)::value_type) }));
+	return composite;
 }
 
 /*
@@ -183,7 +177,7 @@ nano::container_info nano::scheduler::optimistic::container_info () const
 
 nano::error nano::scheduler::optimistic_config::deserialize (nano::tomlconfig & toml)
 {
-	toml.get ("enable", enabled);
+	toml.get ("enabled", enabled);
 	toml.get ("gap_threshold", gap_threshold);
 	toml.get ("max_size", max_size);
 

@@ -4,7 +4,6 @@
 #include <nano/lib/numbers.hpp>
 #include <nano/lib/timer.hpp>
 #include <nano/lib/utility.hpp>
-#include <nano/node/fwd.hpp>
 #include <nano/secure/common.hpp>
 
 #include <boost/multi_index/hashed_index.hpp>
@@ -20,6 +19,13 @@
 #include <vector>
 
 namespace mi = boost::multi_index;
+
+namespace nano
+{
+class node;
+class ledger;
+class active_transactions;
+}
 
 namespace nano::scheduler
 {
@@ -44,7 +50,7 @@ class optimistic final
 	struct entry;
 
 public:
-	optimistic (optimistic_config const &, nano::node &, nano::ledger &, nano::active_elections &, nano::network_constants const & network_constants, nano::stats &);
+	optimistic (optimistic_config const &, nano::node &, nano::ledger &, nano::active_transactions &, nano::network_constants const & network_constants, nano::stats &);
 	~optimistic ();
 
 	void start ();
@@ -60,20 +66,20 @@ public:
 	 */
 	void notify ();
 
-	nano::container_info container_info () const;
+	std::unique_ptr<container_info_component> collect_container_info (std::string const & name) const;
 
 private:
 	bool activate_predicate (nano::account_info const &, nano::confirmation_height_info const &) const;
 
 	bool predicate () const;
 	void run ();
-	void run_one (secure::transaction const &, entry const & candidate);
+	void run_one (store::transaction const &, entry const & candidate);
 
 private: // Dependencies
 	optimistic_config const & config;
 	nano::node & node;
 	nano::ledger & ledger;
-	nano::active_elections & active;
+	nano::active_transactions & active;
 	nano::network_constants const & network_constants;
 	nano::stats & stats;
 

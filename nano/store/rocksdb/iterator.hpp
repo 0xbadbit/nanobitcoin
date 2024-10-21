@@ -33,8 +33,7 @@ class iterator : public iterator_impl<T, U>
 public:
 	iterator () = default;
 
-	iterator (::rocksdb::DB * db, store::transaction const & transaction_a, ::rocksdb::ColumnFamilyHandle * handle_a, db_val const * val_a, bool const direction_asc) :
-		nano::store::iterator_impl<T, U> (transaction_a)
+	iterator (::rocksdb::DB * db, store::transaction const & transaction_a, ::rocksdb::ColumnFamilyHandle * handle_a, db_val const * val_a, bool const direction_asc)
 	{
 		// Don't fill the block cache for any blocks read as a result of an iterator
 		if (is_read (transaction_a))
@@ -130,7 +129,7 @@ public:
 		return *this;
 	}
 
-	std::pair<nano::store::rocksdb::db_val, nano::store::rocksdb::db_val> * operator->()
+	std::pair<nano::store::rocksdb::db_val, nano::store::rocksdb::db_val> * operator-> ()
 	{
 		return &current;
 	}

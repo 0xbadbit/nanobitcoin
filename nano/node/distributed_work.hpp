@@ -9,8 +9,6 @@
 #include <nano/lib/work.hpp>
 #include <nano/node/common.hpp>
 
-#include <optional>
-
 using request_type = boost::beast::http::request<boost::beast::http::string_body>;
 
 namespace boost
@@ -30,8 +28,8 @@ struct work_request final
 	nano::work_version version;
 	nano::root root;
 	uint64_t difficulty;
-	std::optional<nano::account> const account;
-	std::function<void (std::optional<uint64_t>)> callback;
+	boost::optional<nano::account> const account;
+	std::function<void (boost::optional<uint64_t>)> callback;
 	std::vector<std::pair<std::string, uint16_t>> const peers;
 };
 

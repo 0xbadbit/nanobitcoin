@@ -8,6 +8,7 @@ namespace nano::transport
 enum class traffic_type
 {
 	generic,
-	bootstrap, // Ascending bootstrap (asc_pull_ack, asc_pull_req) traffic
+	/** For bootstrap (asc_pull_ack, asc_pull_req) traffic */
+	bootstrap
 };
 }

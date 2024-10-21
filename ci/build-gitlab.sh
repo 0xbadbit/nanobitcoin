@@ -54,15 +54,15 @@ fi
 
 case "${NETWORK}" in
   "TEST")
-      NETWORK_CFG="-DACTIVE_NETWORK=nano_test_network"
+      NETWORK_CFG="-DACTIVE_NETWORK=nanobitcoin_test_network"
       CONFIGURATION="RelWithDebInfo"
       ;;
   "BETA")
-      NETWORK_CFG="-DACTIVE_NETWORK=nano_beta_network"
+      NETWORK_CFG="-DACTIVE_NETWORK=nanobitcoin_beta_network"
       CONFIGURATION="RelWithDebInfo"
       ;;
   *)
-      NETWORK_CFG="-DACTIVE_NETWORK=nano_live_network"
+      NETWORK_CFG="-DACTIVE_NETWORK=nanobitcoin_live_network"
       CONFIGURATION="Release"
       ;;
 esac

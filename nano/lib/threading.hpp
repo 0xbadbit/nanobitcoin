@@ -4,8 +4,6 @@
 
 #include <boost/thread/thread.hpp>
 
-#include <thread>
-
 namespace nano
 {
 namespace thread_attributes
@@ -16,7 +14,7 @@ namespace thread_attributes
 /**
  * Number of available logical processor cores. Might be overridden by setting `NANO_HARDWARE_CONCURRENCY` environment variable
  */
-unsigned hardware_concurrency ();
+unsigned int hardware_concurrency ();
 
 /**
  * If thread is joinable joins it, otherwise does nothing

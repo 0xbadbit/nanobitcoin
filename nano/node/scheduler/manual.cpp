@@ -1,5 +1,3 @@
-#include <nano/node/active_elections.hpp>
-#include <nano/node/election.hpp>
 #include <nano/node/node.hpp>
 #include <nano/node/scheduler/manual.hpp>
 
@@ -39,10 +37,10 @@ void nano::scheduler::manual::notify ()
 	condition.notify_all ();
 }
 
-void nano::scheduler::manual::push (std::shared_ptr<nano::block> const & block_a, boost::optional<nano::uint128_t> const & previous_balance_a)
+void nano::scheduler::manual::push (std::shared_ptr<nano::block> const & block_a, boost::optional<nano::uint128_t> const & previous_balance_a, nano::election_behavior election_behavior_a)
 {
 	nano::lock_guard<nano::mutex> lock{ mutex };
-	queue.push_back (std::make_tuple (block_a, previous_balance_a, nano::election_behavior::manual));
+	queue.push_back (std::make_tuple (block_a, previous_balance_a, election_behavior_a));
 	notify ();
 }
 
@@ -86,11 +84,11 @@ void nano::scheduler::manual::run ()
 	}
 }
 
-nano::container_info nano::scheduler::manual::container_info () const
+std::unique_ptr<nano::container_info_component> nano::scheduler::manual::collect_container_info (std::string const & name) const
 {
-	nano::lock_guard<nano::mutex> lock{ mutex };
+	nano::unique_lock<nano::mutex> lock{ mutex };
 
-	nano::container_info info;
-	info.put ("queue", queue);
-	return info;
+	auto composite = std::make_unique<container_info_composite> (name);
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "queue", queue.size (), sizeof (decltype (queue)::value_type) }));
+	return composite;
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nano/node/common.hpp>
+
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
@@ -24,8 +26,7 @@ namespace bootstrap_ascending
 	class peer_scoring
 	{
 	public:
-		peer_scoring (bootstrap_ascending_config const &, nano::network_constants const &);
-
+		peer_scoring (nano::bootstrap_ascending_config & config, nano::network_constants const & network_constants);
 		// Returns true if channel limit has been exceeded
 		bool try_send_message (std::shared_ptr<nano::transport::channel> channel);
 		void received_message (std::shared_ptr<nano::transport::channel> channel);
@@ -35,10 +36,6 @@ namespace bootstrap_ascending
 		// Decays scores which become inaccurate over time due to message drops
 		void timeout ();
 		void sync (std::deque<std::shared_ptr<nano::transport::channel>> const & list);
-
-	private:
-		bootstrap_ascending_config const & config;
-		nano::network_constants const & network_constants;
 
 	private:
 		class peer_score
@@ -68,6 +65,8 @@ namespace bootstrap_ascending
 			uint64_t request_count_total{ 0 };
 			uint64_t response_count_total{ 0 };
 		};
+		nano::network_constants const & network_constants;
+		nano::bootstrap_ascending_config & config;
 
 		// clang-format off
 		// Indexes scores by their shared channel pointer

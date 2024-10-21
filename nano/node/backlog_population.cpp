@@ -1,17 +1,12 @@
-#include <nano/lib/thread_roles.hpp>
 #include <nano/lib/threading.hpp>
 #include <nano/node/backlog_population.hpp>
 #include <nano/node/nodeconfig.hpp>
 #include <nano/node/scheduler/priority.hpp>
-#include <nano/secure/ledger.hpp>
-#include <nano/store/account.hpp>
 #include <nano/store/component.hpp>
-#include <nano/store/confirmation_height.hpp>
 
-nano::backlog_population::backlog_population (backlog_population_config const & config_a, nano::scheduler::component & schedulers, nano::ledger & ledger, nano::stats & stats_a) :
-	config{ config_a },
-	schedulers{ schedulers },
-	ledger{ ledger },
+nano::backlog_population::backlog_population (const config & config_a, nano::store::component & store_a, nano::stats & stats_a) :
+	config_m{ config_a },
+	store{ store_a },
 	stats{ stats_a }
 {
 }
@@ -58,7 +53,7 @@ void nano::backlog_population::notify ()
 
 bool nano::backlog_population::predicate () const
 {
-	return triggered || config.enable;
+	return triggered || config_m.enabled;
 }
 
 void nano::backlog_population::run ()
@@ -82,9 +77,9 @@ void nano::backlog_population::run ()
 
 void nano::backlog_population::populate_backlog (nano::unique_lock<nano::mutex> & lock)
 {
-	debug_assert (config.frequency > 0);
+	debug_assert (config_m.frequency > 0);
 
-	const auto chunk_size = config.batch_size / config.frequency;
+	const auto chunk_size = config_m.batch_size / config_m.frequency;
 	auto done = false;
 	nano::account next = 0;
 	uint64_t total = 0;
@@ -93,41 +88,43 @@ void nano::backlog_population::populate_backlog (nano::unique_lock<nano::mutex> 
 		lock.unlock ();
 
 		{
-			auto transaction = ledger.tx_begin_read ();
+			auto transaction = store.tx_begin_read ();
 
-			auto it = ledger.store.account.begin (transaction, next);
-			auto const end = ledger.store.account.end ();
-
-			auto should_refresh = [&transaction] () {
-				auto cutoff = std::chrono::steady_clock::now () - 100ms; // TODO: Make this configurable
-				return transaction.timestamp () < cutoff;
-			};
-
-			for (size_t count = 0; it != end && count < chunk_size && !should_refresh (); ++it, ++count, ++total)
+			auto count = 0u;
+			auto i = store.account.begin (transaction, next);
+			auto const end = store.account.end ();
+			for (; i != end && count < chunk_size; ++i, ++count, ++total)
 			{
+				transaction.refresh_if_needed ();
+
 				stats.inc (nano::stat::type::backlog, nano::stat::detail::total);
 
-				auto const & account = it->first;
-				auto const & account_info = it->second;
-
-				activate (transaction, account, account_info);
-
+				auto const & account = i->first;
+				activate (transaction, account);
 				next = account.number () + 1;
 			}
-
-			done = ledger.store.account.begin (transaction, next) == end;
+			done = store.account.begin (transaction, next) == end;
 		}
 
 		lock.lock ();
 
 		// Give the rest of the node time to progress without holding database lock
-		condition.wait_for (lock, std::chrono::milliseconds{ 1000 / config.frequency });
+		condition.wait_for (lock, std::chrono::milliseconds{ 1000 / config_m.frequency });
 	}
 }
 
-void nano::backlog_population::activate (secure::transaction const & transaction, nano::account const & account, nano::account_info const & account_info)
+void nano::backlog_population::activate (store::transaction const & transaction, nano::account const & account)
 {
-	auto const maybe_conf_info = ledger.store.confirmation_height.get (transaction, account);
+	debug_assert (!activate_callback.empty ());
+
+	auto const maybe_account_info = store.account.get (transaction, account);
+	if (!maybe_account_info)
+	{
+		return;
+	}
+	auto const account_info = *maybe_account_info;
+
+	auto const maybe_conf_info = store.confirmation_height.get (transaction, account);
 	auto const conf_info = maybe_conf_info.value_or (nano::confirmation_height_info{});
 
 	// If conf info is empty then it means then it means nothing is confirmed yet
@@ -135,31 +132,6 @@ void nano::backlog_population::activate (secure::transaction const & transaction
 	{
 		stats.inc (nano::stat::type::backlog, nano::stat::detail::activated);
 
-		activate_callback.notify (transaction, account);
-
-		schedulers.optimistic.activate (account, account_info, conf_info);
-		schedulers.priority.activate (transaction, account, account_info, conf_info);
+		activate_callback.notify (transaction, account, account_info, conf_info);
 	}
-}
-
-/*
- * backlog_population_config
- */
-
-nano::error nano::backlog_population_config::serialize (nano::tomlconfig & toml) const
-{
-	toml.put ("enable", enable, "Control if ongoing backlog population is enabled. If not, backlog population can still be triggered by RPC \ntype:bool");
-	toml.put ("batch_size", batch_size, "Number of accounts per second to process when doing backlog population scan. Increasing this value will help unconfirmed frontiers get into election prioritization queue faster, however it will also increase resource usage. \ntype:uint");
-	toml.put ("frequency", frequency, "Backlog scan divides the scan into smaller batches, number of which is controlled by this value. Higher frequency helps to utilize resources more uniformly, however it also introduces more overhead. The resulting number of accounts per single batch is `backlog_scan_batch_size / backlog_scan_frequency` \ntype:uint");
-
-	return toml.get_error ();
-}
-
-nano::error nano::backlog_population_config::deserialize (nano::tomlconfig & toml)
-{
-	toml.get ("enable", enable);
-	toml.get ("batch_size", batch_size);
-	toml.get ("frequency", frequency);
-
-	return toml.get_error ();
 }

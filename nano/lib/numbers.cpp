@@ -50,7 +50,7 @@ void nano::public_key::encode_account (std::string & destination_a) const
 		number_l >>= 5;
 		destination_a.push_back (account_encode (r));
 	}
-	destination_a.append ("_onan"); // nano_
+	destination_a.append ("_ctb"); // btc_
 	std::reverse (destination_a.begin (), destination_a.end ());
 }
 
@@ -86,15 +86,15 @@ bool nano::public_key::decode_account (std::string const & source_a)
 	auto error (source_a.size () < 5);
 	if (!error)
 	{
-		auto xrb_prefix (source_a[0] == 'x' && source_a[1] == 'r' && source_a[2] == 'b' && (source_a[3] == '_' || source_a[3] == '-'));
-		auto nano_prefix (source_a[0] == 'n' && source_a[1] == 'a' && source_a[2] == 'n' && source_a[3] == 'o' && (source_a[4] == '_' || source_a[4] == '-'));
+		auto btc_prefix (source_a[0] == 'b' && source_a[1] == 't' && source_a[2] == 'c' && (source_a[3] == '_' || source_a[3] == '-'));
+		auto nano_prefix (source_a[0] == 'b' && source_a[1] == 't' && source_a[2] == 'c' && source_a[3] == 'o' && (source_a[4] == '_' || source_a[4] == '-'));
 		auto node_id_prefix = (source_a[0] == 'n' && source_a[1] == 'o' && source_a[2] == 'd' && source_a[3] == 'e' && source_a[4] == '_');
-		error = (xrb_prefix && source_a.size () != 64) || (nano_prefix && source_a.size () != 65);
+		error = (btc_prefix && source_a.size () != 64) || (nano_prefix && source_a.size () != 65);
 		if (!error)
 		{
-			if (xrb_prefix || nano_prefix || node_id_prefix)
+			if (btc_prefix || nano_prefix || node_id_prefix)
 			{
-				auto i (source_a.begin () + (xrb_prefix ? 4 : 5));
+				auto i (source_a.begin () + (btc_prefix ? 4 : 5));
 				if (*i == '1' || *i == '3')
 				{
 					nano::uint512_t number_l;
@@ -892,27 +892,6 @@ std::string nano::to_string (double const value_a, int const precision_a)
 	stream << std::setprecision (precision_a) << std::fixed;
 	stream << value_a;
 	return stream.str ();
-}
-
-std::ostream & nano::operator<< (std::ostream & os, const uint128_union & val)
-{
-	// TODO: Replace with streaming implementation
-	os << val.to_string ();
-	return os;
-}
-
-std::ostream & nano::operator<< (std::ostream & os, const uint256_union & val)
-{
-	// TODO: Replace with streaming implementation
-	os << val.to_string ();
-	return os;
-}
-
-std::ostream & nano::operator<< (std::ostream & os, const uint512_union & val)
-{
-	// TODO: Replace with streaming implementation
-	os << val.to_string ();
-	return os;
 }
 
 #ifdef _WIN32

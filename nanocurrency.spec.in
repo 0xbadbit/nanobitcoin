@@ -1,7 +1,7 @@
-Name:                   nanocurrency
+Name:                   nanobitcoin
 Version:                @VERSION@ 
 Release:                @RELEASE@%{?dist}
-Summary:                Nanocurrency Daemon
+Summary:                Nanobitcoin Daemon
 License:                BSD-2-Clause
 URL:                    https://nano.org/
 Requires(pre):          /usr/sbin/useradd, /usr/bin/getent
@@ -10,7 +10,7 @@ BuildRequires:          make, glibc-devel, glibc-headers
 Source:                 nano-%{version}.tar.gz
 
 %description
-This is nanocurrency daemon.  Nano is a digital currency that is
+This is nanobitcoin daemon.  Nanobitcoin is a digital currency that is
 peer-to-peer, decentralized, and trustless. This package includes
 the nano daemon, and a service.
 
@@ -29,34 +29,34 @@ fi
 
 %build
 cmake -DCMAKE_VERBOSE_MAKEFILE=ON .
-make nano_node %{?_smp_mflags}
-make nano_rpc %{?_smp_mflags}
+make nanobitcoin_node %{?_smp_mflags}
+make nanobitcoin_rpc %{?_smp_mflags}
 
 %install
 if [ ! %{buildroot} = "/" ]; then %{__rm} -rf %{buildroot}; fi
 mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/etc/systemd/system/
-cp nano_node %{buildroot}/usr/bin/nano_node
+cp nanobitcoin_node %{buildroot}/usr/bin/nanobitcoin_node
 cp nano_rpc %{buildroot}/usr/bin/nano_rpc
-cp etc/systemd/nanocurrency.service %{buildroot}/etc/systemd/system/nanocurrency.service
+cp etc/systemd/nanobitcoin.service %{buildroot}/etc/systemd/system/nanobitcoin.service
 
 %clean
 if [ ! %{buildroot} = "/" ]; then %{__rm} -rf %{buildroot}; fi
 
 %files
 %defattr(755,root,root)
-%{_bindir}/nano_node
-%{_bindir}/nano_rpc
-%attr(644,root,root) /etc/systemd/system/nanocurrency.service
+%{_bindir}/nanobitcoin_node
+%{_bindir}/nanobitcoin_rpc
+%attr(644,root,root) /etc/systemd/system/nanobitcoin.service
 
 %pre
 PATH="/usr/bin:/usr/sbin:/bin:/sbin:${PATH}"; export PATH
-mkdir -p /var/nanocurrency/Nano
-getent group nanocurrency >/dev/null || groupadd --system nanocurrency || exit 1
-getent passwd nanocurrency >/dev/null || useradd --system --create-home --home-dir /var/nanocurrency --shell /bin/bash --comment "Nanocurrency Daemon user" --gid nanocurrency nanocurrency || exit 1
-chown -R nanocurrency:nanocurrency /var/nanocurrency
-chmod 700 /var/nanocurrency
+mkdir -p /var/nanobitcoin/Nanobitcoin
+getent group nanobitcoin >/dev/null || groupadd --system nanobitcoin || exit 1
+getent passwd nanobitcoin >/dev/null || useradd --system --create-home --home-dir /var/nanobitcoin --shell /bin/bash --comment "Nanobitcoin Daemon user" --gid nanobitcoin nanobitcoin || exit 1
+chown -R nanobitcoin:nanobitcoin /var/nanobitcoin
+chmod 700 /var/nanobitcoin
 
 %postun
 PATH="/usr/bin:/usr/sbin:/bin:/sbin:${PATH}"; export PATH
-userdel nanocurrency >/dev/null 2>/dev/null || :
+userdel nanobitcoin >/dev/null 2>/dev/null || :

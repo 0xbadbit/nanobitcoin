@@ -1,6 +1,4 @@
-#include <nano/lib/blocks.hpp>
-#include <nano/node/active_elections.hpp>
-#include <nano/secure/ledger.hpp>
+#include <nano/node/active_transactions.hpp>
 #include <nano/test_common/chains.hpp>
 #include <nano/test_common/system.hpp>
 #include <nano/test_common/testutil.hpp>
@@ -22,7 +20,7 @@ TEST (backlog, population)
 	nano::test::system system{};
 	auto & node = *system.add_node ();
 
-	node.backlog.activate_callback.add ([&] (nano::secure::transaction const & transaction, nano::account const & account) {
+	node.backlog.activate_callback.add ([&] (nano::store::transaction const & transaction, nano::account const & account, nano::account_info const & account_info, nano::confirmation_height_info const & conf_info) {
 		nano::lock_guard<nano::mutex> lock{ mutex };
 
 		activated.insert (account);
@@ -34,7 +32,9 @@ TEST (backlog, population)
 	auto all_activated = [&] () {
 		nano::lock_guard<nano::mutex> lock{ mutex };
 		return std::all_of (blocks.begin (), blocks.end (), [&] (auto const & item) {
-			return activated.count (item->account ()) != 0;
+			auto account = item->account ();
+			debug_assert (!account.is_zero ());
+			return activated.count (account) != 0;
 		});
 	};
 	ASSERT_TIMELY (5s, all_activated ());
@@ -46,31 +46,4 @@ TEST (backlog, population)
 	}
 
 	ASSERT_TIMELY (5s, all_activated ());
-}
-
-/*
- * Ensures that elections are activated without live traffic
- */
-TEST (backlog, election_activation)
-{
-	nano::test::system system;
-	nano::node_config node_config = system.default_config ();
-	auto & node = *system.add_node (node_config);
-	nano::keypair key;
-	nano::block_builder builder;
-	auto send = builder
-				.state ()
-				.account (nano::dev::genesis_key.pub)
-				.previous (nano::dev::genesis->hash ())
-				.representative (nano::dev::genesis_key.pub)
-				.balance (nano::dev::constants.genesis_amount - nano::Knano_ratio)
-				.link (key.pub)
-				.sign (nano::dev::genesis_key.prv, nano::dev::genesis_key.pub)
-				.work (*node.work_generate_blocking (nano::dev::genesis->hash ()))
-				.build ();
-	{
-		auto transaction = node.ledger.tx_begin_write ();
-		ASSERT_EQ (nano::block_status::progress, node.ledger.process (transaction, send));
-	}
-	ASSERT_TIMELY_EQ (5s, node.active.size (), 1);
 }

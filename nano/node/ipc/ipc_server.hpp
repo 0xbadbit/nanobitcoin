@@ -1,17 +1,19 @@
 #pragma once
 
+#include <nano/ipc_flatbuffers_lib/generated/flatbuffers/nanoapi_generated.h>
 #include <nano/lib/errors.hpp>
 #include <nano/lib/ipc.hpp>
-#include <nano/lib/logging.hpp>
 #include <nano/node/ipc/ipc_access_config.hpp>
 #include <nano/node/ipc/ipc_broker.hpp>
 #include <nano/node/node_rpc_config.hpp>
 
-#include <boost/asio/signal_set.hpp>
-
 #include <atomic>
 #include <memory>
 
+namespace flatbuffers
+{
+class Parser;
+}
 namespace nano
 {
 class node;
@@ -20,7 +22,7 @@ namespace ipc
 {
 	class access;
 	/** The IPC server accepts connections on one or more configured transports */
-	class ipc_server final : public std::enable_shared_from_this<ipc_server>
+	class ipc_server final
 	{
 	public:
 		ipc_server (nano::node & node, nano::node_rpc_config const & node_rpc_config);
@@ -38,16 +40,12 @@ namespace ipc
 		nano::ipc::access & get_access ();
 		nano::error reload_access_config ();
 
-		nano::logger logger{ "ipc_server" };
-
 	private:
-		void
-		setup_callbacks ();
+		void setup_callbacks ();
 		std::shared_ptr<nano::ipc::broker> broker;
 		nano::ipc::access access;
 		std::unique_ptr<dsock_file_remover> file_remover;
 		std::vector<std::shared_ptr<nano::ipc::transport>> transports;
-		std::shared_ptr<boost::asio::signal_set> signals;
 	};
 }
 }

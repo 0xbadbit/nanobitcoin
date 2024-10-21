@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=nanocurrency
-WorkingDirectory=/var/nanocurrency/NanoTest
-ExecStart=/usr/bin/nano_node --daemon --network=test --data_path=/var/nanocurrency/NanoTest
+User=nanobitcoin
+WorkingDirectory=/var/nanobitcoin/NanobitcoinTest
+ExecStart=/usr/bin/nanobitcoin_node --daemon --network=test --data_path=/var/nanobitcoin/NanobitcoinTest
 Restart=on-failure
 
 [Install]

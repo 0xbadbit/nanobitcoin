@@ -1,5 +1,4 @@
 #include <nano/lib/signal_manager.hpp>
-#include <nano/lib/thread_roles.hpp>
 #include <nano/lib/utility.hpp>
 
 #include <boost/asio.hpp>
@@ -11,8 +10,7 @@
 nano::signal_manager::signal_manager () :
 	work (boost::asio::make_work_guard (ioc))
 {
-	thread = std::thread ([&ioc = ioc] () {
-		nano::thread_role::set (nano::thread_role::name::signal_manager);
+	smthread = boost::thread ([&ioc = ioc] () {
 		ioc.run ();
 	});
 }
@@ -23,7 +21,7 @@ nano::signal_manager::~signal_manager ()
 	/// io_context::run() function will exit once all other work has completed.
 	work.reset ();
 	ioc.stop ();
-	thread.join ();
+	smthread.join ();
 }
 
 nano::signal_manager::signal_descriptor::signal_descriptor (std::shared_ptr<boost::asio::signal_set> sigset_a, signal_manager & sigman_a, std::function<void (int)> handler_func_a, bool repeat_a) :
@@ -48,16 +46,14 @@ void nano::signal_manager::register_signal_handler (int signum, std::function<vo
 		nano::signal_manager::base_handler (descriptor, error, signum);
 	});
 
-	logger.debug (nano::log::type::signal_manager, "Registered signal handler for signal: {}", to_signal_name (signum));
+	log (boost::str (boost::format ("Registered signal handler for signal %d") % signum));
 }
 
-void nano::signal_manager::base_handler (nano::signal_manager::signal_descriptor descriptor, boost::system::error_code const & ec, int signum)
+void nano::signal_manager::base_handler (nano::signal_manager::signal_descriptor descriptor, boost::system::error_code const & error, int signum)
 {
-	auto & logger = descriptor.sigman.logger;
-
-	if (!ec)
+	if (!error)
 	{
-		logger.debug (nano::log::type::signal_manager, "Signal received: {}", to_signal_name (signum));
+		descriptor.sigman.log (boost::str (boost::format ("Signal received: %d") % signum));
 
 		// call the user supplied function, if one is provided
 		if (descriptor.handler_func)
@@ -74,31 +70,14 @@ void nano::signal_manager::base_handler (nano::signal_manager::signal_descriptor
 		}
 		else
 		{
-			logger.debug (nano::log::type::signal_manager, "Signal handler {} will not repeat", to_signal_name (signum));
-
+			descriptor.sigman.log (boost::str (boost::format ("Signal handler %d will not repeat") % signum));
 			descriptor.sigset->clear ();
 		}
+
+		descriptor.sigman.log (boost::str (boost::format ("Signal processed: %d") % signum));
 	}
 	else
 	{
-		logger.debug (nano::log::type::signal_manager, "Signal error: {} ({})", ec.message (), to_signal_name (signum));
+		descriptor.sigman.log (boost::str (boost::format ("Signal error: %d (%s)") % error.value () % error.message ()));
 	}
-}
-
-std::string nano::to_signal_name (int signum)
-{
-	switch (signum)
-	{
-		case SIGINT:
-			return "SIGINT";
-		case SIGTERM:
-			return "SIGTERM";
-		case SIGSEGV:
-			return "SIGSEGV";
-		case SIGABRT:
-			return "SIGABRT";
-		case SIGILL:
-			return "SIGILL";
-	}
-	return std::to_string (signum);
 }

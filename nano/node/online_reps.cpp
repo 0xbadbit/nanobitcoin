@@ -40,7 +40,7 @@ void nano::online_reps::sample ()
 	lock.unlock ();
 	nano::uint128_t trend_l;
 	{
-		auto transaction = ledger.store.tx_begin_write ();
+		auto transaction (ledger.store.tx_begin_write ({ tables::online_weight }));
 		// Discard oldest entries
 		while (ledger.store.online_weight.count (transaction) >= config.network_params.node.max_weight_samples)
 		{
@@ -117,11 +117,16 @@ void nano::online_reps::clear ()
 	online_m = 0;
 }
 
-nano::container_info nano::online_reps::container_info () const
+std::unique_ptr<nano::container_info_component> nano::collect_container_info (online_reps & online_reps, std::string const & name)
 {
-	nano::lock_guard<nano::mutex> guard{ mutex };
+	std::size_t count;
+	{
+		nano::lock_guard<nano::mutex> guard{ online_reps.mutex };
+		count = online_reps.reps.size ();
+	}
 
-	nano::container_info info;
-	info.put ("reps", reps);
-	return info;
+	auto sizeof_element = sizeof (decltype (online_reps.reps)::value_type);
+	auto composite = std::make_unique<container_info_composite> (name);
+	composite->add_component (std::make_unique<container_info_leaf> (container_info{ "reps", count, sizeof_element }));
+	return composite;
 }

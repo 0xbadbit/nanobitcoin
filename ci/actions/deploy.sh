@@ -20,6 +20,8 @@ case "${NETWORK}" in
 esac
 
 if [[ -n "${S3_BUILD_DIRECTORY}" ]]; then
+
+
     DIRECTORY="${S3_BUILD_DIRECTORY}/${BUILD}"
 else
     DIRECTORY=$BUILD
@@ -31,7 +33,7 @@ if [[ "$OS" == 'Linux' && "$IS_RPM_DEPLOY" -eq "1" ]]; then
 
     for rpm in $RPMS; do
         SHA=$(sha256sum ${rpm})
-        echo "::notice::Hash: $SHA"
+        echo "Hash: $SHA"
         echo $SHA > ${GITHUB_WORKSPACE}/$(basename "${rpm}.sha256")
 
         aws s3 cp ${rpm} s3://${S3_BUCKET_NAME}/$DIRECTORY/binaries/$(basename "${rpm}") --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
@@ -40,7 +42,7 @@ if [[ "$OS" == 'Linux' && "$IS_RPM_DEPLOY" -eq "1" ]]; then
     
     for srpm in $SRPMS; do
         SHA=$(sha256sum ${srpm})
-        echo "::notice::Hash: $SHA"
+        echo "Hash: $SHA"
         echo $SHA > ${GITHUB_WORKSPACE}/$(basename "${srpm}).sha256")
 
         aws s3 cp ${srpm} s3://${S3_BUCKET_NAME}/$DIRECTORY/source/$(basename "${srpm}") --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
@@ -48,11 +50,11 @@ if [[ "$OS" == 'Linux' && "$IS_RPM_DEPLOY" -eq "1" ]]; then
     done
 elif [[ "$OS" == 'Linux' ]]; then
     SHA=$(sha256sum $GITHUB_WORKSPACE/build/nano-node-*-Linux.tar.bz2)
-    echo "::notice::Hash: $SHA"
+    echo "Hash: $SHA"
     echo $SHA >$GITHUB_WORKSPACE/nano-node-$TAG-Linux.tar.bz2.sha256
 
     SHA=$(sha256sum $GITHUB_WORKSPACE/build/nano-node-*-Linux.deb)
-    echo "::notice::Hash: $SHA"
+    echo "Hash: $SHA"
     echo $SHA >$GITHUB_WORKSPACE/nano-node-$TAG-Linux.deb.sha256
 
     aws s3 cp $GITHUB_WORKSPACE/build/nano-node-*-Linux.tar.bz2 s3://${S3_BUCKET_NAME}/$DIRECTORY/binaries/nano-node-$TAG-Linux.tar.bz2 --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
@@ -61,7 +63,7 @@ elif [[ "$OS" == 'Linux' ]]; then
     aws s3 cp $GITHUB_WORKSPACE/nano-node-$TAG-Linux.deb.sha256 s3://${S3_BUCKET_NAME}/$DIRECTORY/binaries/nano-node-$TAG-Linux.deb.sha256 --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
 else
     SHA=$(sha256sum $GITHUB_WORKSPACE/build/nano-node-*-Darwin.dmg)
-    echo "::notice::Hash: $SHA"
+    echo "Hash: $SHA"
     echo $SHA >$GITHUB_WORKSPACE/build/nano-node-$TAG-Darwin.dmg.sha256
 
     aws s3 cp $GITHUB_WORKSPACE/build/nano-node-*-Darwin.dmg s3://${S3_BUCKET_NAME}/$DIRECTORY/binaries/nano-node-$TAG-Darwin.dmg --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
